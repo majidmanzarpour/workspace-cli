@@ -1,0 +1,30 @@
+# Rust
+/target
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Credentials & Secrets (NEVER commit these)
+credentials.json
+*credentials*.json
+client_secret*.json
+service_account*.json
+*-sa.json
+*_sa.json
+token_cache.json
+*.pem
+*.key
+*.p12
+
+# Environment files
+.env
+.env.*
+!.env.example
