@@ -72,6 +72,50 @@ impl Formatter {
 
         match value {
             serde_json::Value::Object(map) => {
+                // Check for known list wrapper keys (API responses wrap arrays)
+                const WRAPPER_KEYS: &[&str] = &["files", "messages", "items", "labels", "permissions"];
+
+                // Find if this is a wrapper object with an array to filter
+                for wrapper_key in WRAPPER_KEYS {
+                    if let Some(serde_json::Value::Array(arr)) = map.get(*wrapper_key) {
+                        // This is a list wrapper - filter the array items
+                        let filtered_items: Vec<serde_json::Value> = arr.iter()
+                            .map(|item| self.filter_item_fields(item.clone(), fields))
+                            .collect();
+
+                        // Reconstruct wrapper with filtered items + metadata
+                        let mut result = serde_json::Map::new();
+                        result.insert(wrapper_key.to_string(), serde_json::Value::Array(filtered_items));
+
+                        // Preserve metadata keys (nextPageToken, resultSizeEstimate, etc.)
+                        for (key, val) in map.iter() {
+                            if key != *wrapper_key {
+                                result.insert(key.clone(), val.clone());
+                            }
+                        }
+                        return serde_json::Value::Object(result);
+                    }
+                }
+
+                // Not a wrapper - filter as single object
+                self.filter_item_fields(serde_json::Value::Object(map), fields)
+            }
+            serde_json::Value::Array(arr) => {
+                // Filter each item in the array
+                serde_json::Value::Array(
+                    arr.into_iter()
+                        .map(|item| self.filter_item_fields(item, fields))
+                        .collect()
+                )
+            }
+            _ => value,
+        }
+    }
+
+    /// Filter fields from an individual item (not a wrapper)
+    fn filter_item_fields(&self, value: serde_json::Value, fields: &[String]) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
                 let mut filtered = serde_json::Map::new();
                 for field in fields {
                     // Handle nested fields like "payload.headers"
@@ -86,14 +130,6 @@ impl Formatter {
                     }
                 }
                 serde_json::Value::Object(filtered)
-            }
-            serde_json::Value::Array(arr) => {
-                // Filter each item in the array
-                serde_json::Value::Array(
-                    arr.into_iter()
-                        .map(|item| self.filter_fields(item))
-                        .collect()
-                )
             }
             _ => value,
         }

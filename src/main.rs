@@ -566,6 +566,9 @@ enum TasksCommands {
         /// Task list ID
         #[arg(long, default_value = "@default")]
         list: String,
+        /// Maximum number of results (1-100)
+        #[arg(long, default_value = "20")]
+        limit: u32,
         /// Show completed tasks
         #[arg(long)]
         show_completed: bool,
@@ -1595,10 +1598,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                TasksCommands::List { list, show_completed } => {
+                TasksCommands::List { list, limit, show_completed } => {
                     let params = workspace_cli::commands::tasks::list::ListTasksParams {
                         task_list_id: list,
-                        max_results: 100,
+                        max_results: limit.min(100),  // API max is 100
                         show_completed,
                         show_hidden: false,
                         page_token: None,
