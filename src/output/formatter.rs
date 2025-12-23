@@ -26,6 +26,8 @@ pub struct Formatter {
     writer: Box<dyn Write>,
     first_item: bool,
     csv_headers: Option<Vec<String>>,
+    fields: Option<Vec<String>>,
+    quiet: bool,
 }
 
 impl Formatter {
@@ -35,6 +37,8 @@ impl Formatter {
             writer: Box::new(io::stdout()),
             first_item: true,
             csv_headers: None,
+            fields: None,
+            quiet: false,
         }
     }
 
@@ -43,45 +47,147 @@ impl Formatter {
         self
     }
 
+    /// Set field filtering - only include these fields in output
+    pub fn with_fields(mut self, fields: Option<Vec<String>>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    /// Set quiet mode - suppress all output
+    pub fn with_quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
+        self
+    }
+
     pub fn format(&self) -> OutputFormat {
         self.format
     }
 
+    /// Filter a JSON value to only include specified fields
+    fn filter_fields(&self, value: serde_json::Value) -> serde_json::Value {
+        let fields = match &self.fields {
+            Some(f) if !f.is_empty() => f,
+            _ => return value,
+        };
+
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut filtered = serde_json::Map::new();
+                for field in fields {
+                    // Handle nested fields like "payload.headers"
+                    let parts: Vec<&str> = field.split('.').collect();
+                    if let Some(val) = Self::get_nested_value(&serde_json::Value::Object(map.clone()), &parts) {
+                        if parts.len() == 1 {
+                            filtered.insert(parts[0].to_string(), val);
+                        } else {
+                            // For nested fields, reconstruct the path
+                            Self::set_nested_value(&mut filtered, &parts, val);
+                        }
+                    }
+                }
+                serde_json::Value::Object(filtered)
+            }
+            serde_json::Value::Array(arr) => {
+                // Filter each item in the array
+                serde_json::Value::Array(
+                    arr.into_iter()
+                        .map(|item| self.filter_fields(item))
+                        .collect()
+                )
+            }
+            _ => value,
+        }
+    }
+
+    /// Get a nested value from a JSON object
+    fn get_nested_value(value: &serde_json::Value, parts: &[&str]) -> Option<serde_json::Value> {
+        if parts.is_empty() {
+            return Some(value.clone());
+        }
+
+        match value {
+            serde_json::Value::Object(map) => {
+                map.get(parts[0]).and_then(|v| {
+                    if parts.len() == 1 {
+                        Some(v.clone())
+                    } else {
+                        Self::get_nested_value(v, &parts[1..])
+                    }
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Set a nested value in a JSON map
+    fn set_nested_value(map: &mut serde_json::Map<String, serde_json::Value>, parts: &[&str], value: serde_json::Value) {
+        if parts.is_empty() {
+            return;
+        }
+
+        if parts.len() == 1 {
+            map.insert(parts[0].to_string(), value);
+        } else {
+            let child = map.entry(parts[0].to_string())
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(child_map) = child {
+                Self::set_nested_value(child_map, &parts[1..], value);
+            }
+        }
+    }
+
     /// Write a single item
     pub fn write<T: Serialize>(&mut self, item: &T) -> io::Result<()> {
+        // Quiet mode: suppress all output
+        if self.quiet {
+            return Ok(());
+        }
+
+        // Convert to JSON value for field filtering
+        let value = serde_json::to_value(item)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let filtered = self.filter_fields(value);
+
         match self.format {
             OutputFormat::Json => {
-                let json = serde_json::to_string_pretty(item)
+                let json = serde_json::to_string_pretty(&filtered)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(self.writer, "{}", json)
             }
             OutputFormat::JsonCompact => {
-                let json = serde_json::to_string(item)
+                let json = serde_json::to_string(&filtered)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(self.writer, "{}", json)
             }
             OutputFormat::Jsonl => {
-                let json = serde_json::to_string(item)
+                let json = serde_json::to_string(&filtered)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(self.writer, "{}", json)
             }
             OutputFormat::Csv => {
-                // CSV requires special handling - serialize as single row
-                let json = serde_json::to_value(item)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                self.write_csv_row(&json)
+                self.write_csv_row(&filtered)
             }
         }
     }
 
     /// Write multiple items as an array (JSON) or stream (JSONL/CSV)
     pub fn write_all<T: Serialize>(&mut self, items: &[T]) -> io::Result<()> {
+        // Quiet mode: suppress all output
+        if self.quiet {
+            return Ok(());
+        }
+
         match self.format {
             OutputFormat::Json | OutputFormat::JsonCompact => {
+                // Convert to JSON value for field filtering
+                let value = serde_json::to_value(items)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let filtered = self.filter_fields(value);
+
                 let json = if self.format == OutputFormat::Json {
-                    serde_json::to_string_pretty(items)
+                    serde_json::to_string_pretty(&filtered)
                 } else {
-                    serde_json::to_string(items)
+                    serde_json::to_string(&filtered)
                 }.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(self.writer, "{}", json)
             }
@@ -102,6 +208,9 @@ impl Formatter {
 
     /// Start streaming output (for paginated results)
     pub fn start_stream(&mut self) -> io::Result<()> {
+        if self.quiet {
+            return Ok(());
+        }
         match self.format {
             OutputFormat::Json => write!(self.writer, "["),
             OutputFormat::JsonCompact => write!(self.writer, "["),
@@ -111,6 +220,15 @@ impl Formatter {
 
     /// Write a single item in stream mode
     pub fn stream_item<T: Serialize>(&mut self, item: &T) -> io::Result<()> {
+        if self.quiet {
+            return Ok(());
+        }
+
+        // Convert to JSON value for field filtering
+        let value = serde_json::to_value(item)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let filtered = self.filter_fields(value);
+
         match self.format {
             OutputFormat::Json | OutputFormat::JsonCompact => {
                 if !self.first_item {
@@ -120,7 +238,7 @@ impl Formatter {
 
                 let json = if self.format == OutputFormat::Json {
                     // For pretty JSON in streaming mode, add newline before each item
-                    let pretty = serde_json::to_string_pretty(item)
+                    let pretty = serde_json::to_string_pretty(&filtered)
                         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                     // Indent each line for proper array formatting
                     let indented = pretty.lines()
@@ -129,26 +247,27 @@ impl Formatter {
                         .join("\n");
                     format!("\n{}", indented)
                 } else {
-                    serde_json::to_string(item)
+                    serde_json::to_string(&filtered)
                         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
                 };
                 write!(self.writer, "{}", json)
             }
             OutputFormat::Jsonl => {
-                let json = serde_json::to_string(item)
+                let json = serde_json::to_string(&filtered)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(self.writer, "{}", json)
             }
             OutputFormat::Csv => {
-                let json = serde_json::to_value(item)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                self.write_csv_row(&json)
+                self.write_csv_row(&filtered)
             }
         }
     }
 
     /// End streaming output
     pub fn end_stream(&mut self) -> io::Result<()> {
+        if self.quiet {
+            return Ok(());
+        }
         match self.format {
             OutputFormat::Json => writeln!(self.writer, "\n]"),
             OutputFormat::JsonCompact => writeln!(self.writer, "]"),

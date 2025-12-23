@@ -1,6 +1,7 @@
 pub mod types;
 pub mod get;
 pub mod update;
+pub mod create;
 
 // Re-export commonly used types
 pub use types::{
@@ -32,3 +33,6 @@ pub use update::{
     clear_values,
     parse_values_json,
 };
+
+// Re-export create functions
+pub use create::{create_spreadsheet, create_spreadsheet_with_sheets};

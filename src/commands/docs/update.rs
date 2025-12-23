@@ -1,6 +1,6 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{BatchUpdateRequest, BatchUpdateResponse, Request, InsertTextRequest, Location, Document};
+use super::types::{BatchUpdateRequest, BatchUpdateResponse, Request, InsertTextRequest, Location, Document, ReplaceAllTextRequest, SubstringMatchCriteria};
 use super::get::get_document;
 
 /// Append text to the end of a document
@@ -26,6 +26,7 @@ pub async fn append_text(
                         segment_id: None,
                     },
                 }),
+                replace_all_text: None,
             },
         ],
     };
@@ -51,6 +52,7 @@ pub async fn insert_text(
                         segment_id: None,
                     },
                 }),
+                replace_all_text: None,
             },
         ],
     };
@@ -65,4 +67,31 @@ fn get_end_index(doc: &Document) -> i64 {
         .and_then(|b| b.content.last())
         .and_then(|e| e.end_index)
         .unwrap_or(1)
+}
+
+/// Replace all occurrences of text in a document
+pub async fn replace_text(
+    client: &ApiClient,
+    document_id: &str,
+    find: &str,
+    replace: &str,
+    match_case: bool,
+) -> Result<BatchUpdateResponse> {
+    let request = BatchUpdateRequest {
+        requests: vec![
+            Request {
+                insert_text: None,
+                replace_all_text: Some(ReplaceAllTextRequest {
+                    contains_text: SubstringMatchCriteria {
+                        text: find.to_string(),
+                        match_case,
+                    },
+                    replace_text: replace.to_string(),
+                }),
+            },
+        ],
+    };
+
+    let path = format!("/documents/{}:batchUpdate", document_id);
+    client.post(&path, &request).await
 }

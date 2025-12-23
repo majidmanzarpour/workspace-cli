@@ -224,6 +224,49 @@ enum GmailCommands {
         #[arg(long)]
         body: Option<String>,
     },
+    /// Permanently delete a message (bypasses trash)
+    Delete {
+        /// Message ID to delete
+        id: String,
+    },
+    /// Move message to trash
+    Trash {
+        /// Message ID to trash
+        id: String,
+    },
+    /// Remove message from trash
+    Untrash {
+        /// Message ID to untrash
+        id: String,
+    },
+    /// List all labels
+    Labels,
+    /// Modify labels on a message
+    Modify {
+        /// Message ID
+        id: String,
+        /// Labels to add (comma-separated)
+        #[arg(long)]
+        add_labels: Option<String>,
+        /// Labels to remove (comma-separated)
+        #[arg(long)]
+        remove_labels: Option<String>,
+        /// Mark as read
+        #[arg(long)]
+        mark_read: bool,
+        /// Mark as unread
+        #[arg(long)]
+        mark_unread: bool,
+        /// Star message
+        #[arg(long)]
+        star: bool,
+        /// Unstar message
+        #[arg(long)]
+        unstar: bool,
+        /// Archive message (remove from inbox)
+        #[arg(long)]
+        archive: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -263,6 +306,81 @@ enum DriveCommands {
     Get {
         /// File ID
         id: String,
+    },
+    /// Permanently delete a file (bypasses trash)
+    Delete {
+        /// File ID to delete
+        id: String,
+    },
+    /// Move file to trash
+    Trash {
+        /// File ID to trash
+        id: String,
+    },
+    /// Restore file from trash
+    Untrash {
+        /// File ID to restore
+        id: String,
+    },
+    /// Create a new folder
+    Mkdir {
+        /// Folder name
+        name: String,
+        /// Parent folder ID
+        #[arg(long)]
+        parent: Option<String>,
+    },
+    /// Move a file to a different folder
+    Move {
+        /// File ID to move
+        id: String,
+        /// Destination folder ID
+        #[arg(long)]
+        to: String,
+    },
+    /// Copy a file
+    Copy {
+        /// File ID to copy
+        id: String,
+        /// New name for the copy
+        #[arg(long)]
+        name: Option<String>,
+        /// Destination folder ID
+        #[arg(long)]
+        parent: Option<String>,
+    },
+    /// Rename a file
+    Rename {
+        /// File ID to rename
+        id: String,
+        /// New name
+        name: String,
+    },
+    /// Share a file
+    Share {
+        /// File ID to share
+        id: String,
+        /// Share with this email address
+        #[arg(long)]
+        email: Option<String>,
+        /// Share with anyone (make public)
+        #[arg(long)]
+        anyone: bool,
+        /// Role: reader, commenter, writer
+        #[arg(long, default_value = "reader")]
+        role: String,
+    },
+    /// List permissions on a file
+    Permissions {
+        /// File ID
+        id: String,
+    },
+    /// Remove a permission from a file
+    Unshare {
+        /// File ID
+        id: String,
+        /// Permission ID to remove
+        permission_id: String,
     },
 }
 
@@ -348,6 +466,25 @@ enum DocsCommands {
         /// Text to append
         text: String,
     },
+    /// Create a new document
+    Create {
+        /// Document title
+        title: String,
+    },
+    /// Replace text in document
+    Replace {
+        /// Document ID
+        id: String,
+        /// Text to find
+        #[arg(long)]
+        find: String,
+        /// Text to replace with
+        #[arg(long, name = "with")]
+        replace_with: String,
+        /// Match case
+        #[arg(long)]
+        match_case: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -381,6 +518,19 @@ enum SheetsCommands {
         /// Values as JSON array of arrays
         #[arg(long)]
         values: String,
+    },
+    /// Create a new spreadsheet
+    Create {
+        /// Spreadsheet title
+        title: String,
+    },
+    /// Clear a range of cells
+    Clear {
+        /// Spreadsheet ID
+        id: String,
+        /// Range to clear in A1 notation
+        #[arg(long)]
+        range: String,
     },
 }
 
@@ -495,6 +645,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // Determine output format
     let format = OutputFormat::from_str(&cli.format).unwrap_or(OutputFormat::Json);
 
+    // Parse fields for filtering
+    let fields: Option<Vec<String>> = cli.fields.as_ref().map(|f| {
+        f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    });
+    let quiet = cli.quiet;
+
     // Route commands
     match cli.command {
         Commands::Gmail { command } => {
@@ -508,7 +664,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let client = ApiClient::gmail(token_manager.clone());
-            let mut formatter = Formatter::new(format);
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
                 GmailCommands::List { query, limit, label } => {
@@ -522,7 +678,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_writer(file);
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 file_formatter.write(&response)?;
                             } else {
                                 formatter.write(&response)?;
@@ -540,7 +696,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_writer(file);
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 file_formatter.write(&response)?;
                             } else {
                                 formatter.write(&response)?;
@@ -571,7 +727,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_writer(file);
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 file_formatter.write(&response)?;
                             } else {
                                 formatter.write(&response)?;
@@ -598,7 +754,113 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_writer(file);
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Delete { id } => {
+                    match workspace_cli::commands::gmail::delete::delete_message(&client, &id).await {
+                        Ok(()) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Message deleted permanently"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Trash { id } => {
+                    match workspace_cli::commands::gmail::trash::trash_message(&client, &id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Untrash { id } => {
+                    match workspace_cli::commands::gmail::trash::untrash_message(&client, &id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Labels => {
+                    match workspace_cli::commands::gmail::labels::list_labels(&client).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Modify { id, add_labels, remove_labels, mark_read, mark_unread, star, unstar, archive } => {
+                    // Build label modifications
+                    let mut add: Vec<String> = add_labels
+                        .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
+                        .unwrap_or_default();
+                    let mut remove: Vec<String> = remove_labels
+                        .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
+                        .unwrap_or_default();
+
+                    // Handle convenience flags
+                    if mark_read {
+                        remove.push("UNREAD".to_string());
+                    }
+                    if mark_unread {
+                        add.push("UNREAD".to_string());
+                    }
+                    if star {
+                        add.push("STARRED".to_string());
+                    }
+                    if unstar {
+                        remove.push("STARRED".to_string());
+                    }
+                    if archive {
+                        remove.push("INBOX".to_string());
+                    }
+
+                    match workspace_cli::commands::gmail::labels::modify_labels(&client, &id, add, remove).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 file_formatter.write(&response)?;
                             } else {
                                 formatter.write(&response)?;
@@ -623,12 +885,20 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let client = ApiClient::drive(token_manager.clone());
-            let mut formatter = Formatter::new(format);
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                DriveCommands::List { query, limit, parent: _ } => {
+                DriveCommands::List { query, limit, parent } => {
+                    // Build query with optional parent filter
+                    let final_query = match (query, parent) {
+                        (Some(q), Some(p)) => Some(format!("'{}' in parents and ({})", p, q)),
+                        (Some(q), None) => Some(q),
+                        (None, Some(p)) => Some(format!("'{}' in parents", p)),
+                        (None, None) => None,
+                    };
+
                     let params = workspace_cli::commands::drive::list::ListParams {
-                        query,
+                        query: final_query,
                         max_results: limit,
                         page_token: None,
                         fields: None,
@@ -638,7 +908,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_writer(file);
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 file_formatter.write(&response)?;
                             } else {
                                 formatter.write(&response)?;
@@ -650,17 +920,252 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                DriveCommands::Upload { file: _, parent: _, name: _ } => {
-                    println!(r#"{{"status":"error","message":"Upload command not implemented yet"}}"#);
-                    std::process::exit(1);
+                DriveCommands::Upload { file, parent, name } => {
+                    // Get access token for direct upload
+                    let token = {
+                        let tm = token_manager.read().await;
+                        tm.get_access_token().await.map_err(|e| {
+                            eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
+                            std::process::exit(1);
+                        }).unwrap()
+                    };
+
+                    let params = workspace_cli::commands::drive::upload::UploadParams {
+                        file_path: file,
+                        name,
+                        parent_id: parent,
+                        mime_type: None,
+                    };
+
+                    match workspace_cli::commands::drive::upload::upload_file(&token, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                DriveCommands::Download { id: _, output: _ } => {
-                    println!(r#"{{"status":"error","message":"Download command not implemented yet"}}"#);
-                    std::process::exit(1);
+                DriveCommands::Download { id, output } => {
+                    // Get access token for direct download
+                    let token = {
+                        let tm = token_manager.read().await;
+                        tm.get_access_token().await.map_err(|e| {
+                            eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
+                            std::process::exit(1);
+                        }).unwrap()
+                    };
+
+                    let output_path = output
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| std::path::PathBuf::from(&id));
+
+                    match workspace_cli::commands::drive::download::download_file(&token, &id, &output_path).await {
+                        Ok(bytes) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","file":"{}","bytes":{}}}"#, output_path.display(), bytes);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                DriveCommands::Get { id: _ } => {
-                    println!(r#"{{"status":"error","message":"Drive Get command not implemented yet"}}"#);
-                    std::process::exit(1);
+                DriveCommands::Get { id } => {
+                    match workspace_cli::commands::drive::list::get_file(&client, &id, None).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Delete { id } => {
+                    match workspace_cli::commands::drive::delete::delete_file(&client, &id).await {
+                        Ok(()) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"File deleted permanently"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Trash { id } => {
+                    match workspace_cli::commands::drive::delete::trash_file(&client, &id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Untrash { id } => {
+                    match workspace_cli::commands::drive::delete::untrash_file(&client, &id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Mkdir { name, parent } => {
+                    match workspace_cli::commands::drive::mkdir::create_folder(&client, &name, parent.as_deref()).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Move { id, to } => {
+                    match workspace_cli::commands::drive::operations::move_file(&client, &id, &to, true).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Copy { id, name, parent } => {
+                    match workspace_cli::commands::drive::operations::copy_file(&client, &id, name.as_deref(), parent.as_deref()).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Rename { id, name } => {
+                    match workspace_cli::commands::drive::operations::rename_file(&client, &id, &name).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Share { id, email, anyone, role } => {
+                    let result = if anyone {
+                        workspace_cli::commands::drive::share::share_with_anyone(&client, &id, &role).await
+                    } else if let Some(email) = email {
+                        workspace_cli::commands::drive::share::share_with_user(&client, &id, &email, &role).await
+                    } else {
+                        eprintln!(r#"{{"status":"error","message":"Must specify --email or --anyone"}}"#);
+                        std::process::exit(1);
+                    };
+
+                    match result {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Permissions { id } => {
+                    match workspace_cli::commands::drive::share::list_permissions(&client, &id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Unshare { id, permission_id } => {
+                    match workspace_cli::commands::drive::share::remove_permission(&client, &id, &permission_id).await {
+                        Ok(()) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Permission removed"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
@@ -675,7 +1180,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let client = ApiClient::calendar(token_manager.clone());
-            let mut formatter = Formatter::new(format);
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
                 CalendarCommands::List { calendar, time_min, time_max, limit, sync_token } => {
@@ -693,7 +1198,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_writer(file);
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 file_formatter.write(&response)?;
                             } else {
                                 formatter.write(&response)?;
@@ -705,17 +1210,74 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                CalendarCommands::Create { summary: _, start: _, end: _, description: _, calendar: _ } => {
-                    println!(r#"{{"status":"error","message":"Create event command not implemented yet"}}"#);
-                    std::process::exit(1);
+                CalendarCommands::Create { summary, start, end, description, calendar } => {
+                    let params = workspace_cli::commands::calendar::create::CreateEventParams {
+                        calendar_id: calendar,
+                        summary,
+                        start,
+                        end,
+                        description,
+                        location: None,
+                        attendees: None,
+                        time_zone: None,
+                    };
+
+                    match workspace_cli::commands::calendar::create::create_event(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                CalendarCommands::Update { id: _, summary: _, start: _, end: _, calendar: _ } => {
-                    println!(r#"{{"status":"error","message":"Update event command not implemented yet"}}"#);
-                    std::process::exit(1);
+                CalendarCommands::Update { id, summary, start, end, calendar } => {
+                    let params = workspace_cli::commands::calendar::update::UpdateEventParams {
+                        calendar_id: calendar,
+                        event_id: id,
+                        summary,
+                        description: None,
+                        location: None,
+                        start,
+                        end,
+                        time_zone: None,
+                    };
+
+                    match workspace_cli::commands::calendar::update::update_event(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                CalendarCommands::Delete { id: _, calendar: _ } => {
-                    println!(r#"{{"status":"error","message":"Delete event command not implemented yet"}}"#);
-                    std::process::exit(1);
+                CalendarCommands::Delete { id, calendar } => {
+                    match workspace_cli::commands::calendar::delete::delete_event(&client, &calendar, &id).await {
+                        Ok(()) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Event deleted"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
@@ -729,14 +1291,80 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
+            let client = ApiClient::docs(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
             match command {
-                DocsCommands::Get { id: _, markdown: _ } => {
-                    println!(r#"{{"status":"error","message":"Docs Get command not implemented yet"}}"#);
-                    std::process::exit(1);
+                DocsCommands::Get { id, markdown } => {
+                    match workspace_cli::commands::docs::get::get_document(&client, &id).await {
+                        Ok(doc) => {
+                            if markdown {
+                                let md = workspace_cli::commands::docs::get::document_to_markdown(&doc);
+                                println!("{}", md);
+                            } else if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&doc)?;
+                            } else {
+                                formatter.write(&doc)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                DocsCommands::Append { id: _, text: _ } => {
-                    println!(r#"{{"status":"error","message":"Docs Append command not implemented yet"}}"#);
-                    std::process::exit(1);
+                DocsCommands::Append { id, text } => {
+                    match workspace_cli::commands::docs::update::append_text(&client, &id, &text).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::Create { title } => {
+                    match workspace_cli::commands::docs::create::create_document(&client, &title).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::Replace { id, find, replace_with, match_case } => {
+                    match workspace_cli::commands::docs::update::replace_text(&client, &id, &find, &replace_with, match_case).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
@@ -750,18 +1378,117 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
+            let client = ApiClient::sheets(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
             match command {
-                SheetsCommands::Get { id: _, range: _ } => {
-                    println!(r#"{{"status":"error","message":"Sheets Get command not implemented yet"}}"#);
-                    std::process::exit(1);
+                SheetsCommands::Get { id, range } => {
+                    match workspace_cli::commands::sheets::get::get_values(&client, &id, &range).await {
+                        Ok(response) => {
+                            if format == OutputFormat::Csv {
+                                let csv = workspace_cli::commands::sheets::get::values_to_csv(&response);
+                                if let Some(ref output_path) = cli.output {
+                                    std::fs::write(output_path, &csv)?;
+                                } else if !quiet {
+                                    print!("{}", csv);
+                                }
+                            } else if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                SheetsCommands::Update { id: _, range: _, values: _ } => {
-                    println!(r#"{{"status":"error","message":"Sheets Update command not implemented yet"}}"#);
-                    std::process::exit(1);
+                SheetsCommands::Update { id, range, values } => {
+                    let parsed_values = workspace_cli::commands::sheets::update::parse_values_json(&values)?;
+                    let params = workspace_cli::commands::sheets::update::UpdateParams {
+                        spreadsheet_id: id,
+                        range,
+                        values: parsed_values,
+                        value_input_option: workspace_cli::commands::sheets::update::ValueInputOption::UserEntered,
+                    };
+
+                    match workspace_cli::commands::sheets::update::update_values(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                SheetsCommands::Append { id: _, range: _, values: _ } => {
-                    println!(r#"{{"status":"error","message":"Sheets Append command not implemented yet"}}"#);
-                    std::process::exit(1);
+                SheetsCommands::Append { id, range, values } => {
+                    let parsed_values = workspace_cli::commands::sheets::update::parse_values_json(&values)?;
+
+                    match workspace_cli::commands::sheets::update::append_values(
+                        &client,
+                        &id,
+                        &range,
+                        parsed_values,
+                        workspace_cli::commands::sheets::update::ValueInputOption::UserEntered,
+                    ).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::Create { title } => {
+                    match workspace_cli::commands::sheets::create::create_spreadsheet(&client, &title).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::Clear { id, range } => {
+                    match workspace_cli::commands::sheets::update::clear_values(&client, &id, &range).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
@@ -775,14 +1502,65 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
+            let client = ApiClient::slides(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
             match command {
-                SlidesCommands::Get { id: _, text_only: _ } => {
-                    println!(r#"{{"status":"error","message":"Slides Get command not implemented yet"}}"#);
-                    std::process::exit(1);
+                SlidesCommands::Get { id, text_only } => {
+                    match workspace_cli::commands::slides::get::get_presentation(&client, &id).await {
+                        Ok(presentation) => {
+                            if text_only {
+                                let text = workspace_cli::commands::slides::get::extract_all_text(&presentation);
+                                if let Some(ref output_path) = cli.output {
+                                    std::fs::write(output_path, &text)?;
+                                } else {
+                                    println!("{}", text);
+                                }
+                            } else if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&presentation)?;
+                            } else {
+                                formatter.write(&presentation)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                SlidesCommands::Page { id: _, page: _, text_only: _ } => {
-                    println!(r#"{{"status":"error","message":"Slides Page command not implemented yet"}}"#);
-                    std::process::exit(1);
+                SlidesCommands::Page { id, page, text_only } => {
+                    // Get the presentation first, then extract the specific slide
+                    match workspace_cli::commands::slides::get::get_presentation(&client, &id).await {
+                        Ok(presentation) => {
+                            let page_index = page as usize;
+                            if page_index >= presentation.slides.len() {
+                                eprintln!(r#"{{"status":"error","message":"Page {} not found. Presentation has {} slides."}}"#, page, presentation.slides.len());
+                                std::process::exit(1);
+                            }
+
+                            let slide = &presentation.slides[page_index];
+                            if text_only {
+                                let text = workspace_cli::commands::slides::get::extract_page_text(slide);
+                                if let Some(ref output_path) = cli.output {
+                                    std::fs::write(output_path, &text)?;
+                                } else {
+                                    println!("{}", text);
+                                }
+                            } else if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(slide)?;
+                            } else {
+                                formatter.write(slide)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
@@ -796,26 +1574,113 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
+            let client = ApiClient::tasks(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
             match command {
                 TasksCommands::Lists => {
-                    println!(r#"{{"status":"error","message":"Tasks Lists command not implemented yet"}}"#);
-                    std::process::exit(1);
+                    match workspace_cli::commands::tasks::list::list_task_lists(&client).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                TasksCommands::List { list: _, show_completed: _ } => {
-                    println!(r#"{{"status":"error","message":"Tasks List command not implemented yet"}}"#);
-                    std::process::exit(1);
+                TasksCommands::List { list, show_completed } => {
+                    let params = workspace_cli::commands::tasks::list::ListTasksParams {
+                        task_list_id: list,
+                        max_results: 100,
+                        show_completed,
+                        show_hidden: false,
+                        page_token: None,
+                    };
+                    match workspace_cli::commands::tasks::list::list_tasks(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                TasksCommands::Create { title: _, list: _, due: _, notes: _ } => {
-                    println!(r#"{{"status":"error","message":"Tasks Create command not implemented yet"}}"#);
-                    std::process::exit(1);
+                TasksCommands::Create { title, list, due, notes } => {
+                    let params = workspace_cli::commands::tasks::create::CreateTaskParams {
+                        task_list_id: list,
+                        title,
+                        notes,
+                        due,
+                        parent: None,
+                    };
+                    match workspace_cli::commands::tasks::create::create_task(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                TasksCommands::Update { id: _, list: _, title: _, complete: _ } => {
-                    println!(r#"{{"status":"error","message":"Tasks Update command not implemented yet"}}"#);
-                    std::process::exit(1);
+                TasksCommands::Update { id, list, title, complete } => {
+                    use workspace_cli::commands::tasks::update::TaskStatus;
+                    let params = workspace_cli::commands::tasks::update::UpdateTaskParams {
+                        task_list_id: list,
+                        task_id: id,
+                        title,
+                        status: if complete { Some(TaskStatus::Completed) } else { None },
+                        notes: None,
+                        due: None,
+                    };
+                    match workspace_cli::commands::tasks::update::update_task(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
-                TasksCommands::Delete { id: _, list: _ } => {
-                    println!(r#"{{"status":"error","message":"Tasks Delete command not implemented yet"}}"#);
-                    std::process::exit(1);
+                TasksCommands::Delete { id, list } => {
+                    match workspace_cli::commands::tasks::update::delete_task(&client, &list, &id).await {
+                        Ok(_) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Task deleted"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
@@ -825,7 +1690,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let mut tm = token_manager.write().await;
                     match tm.login_interactive(credentials.map(std::path::PathBuf::from)).await {
                         Ok(()) => {
-                            println!(r#"{{"status":"success","message":"Login successful"}}"#);
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Login successful"}}"#);
+                            }
                         }
                         Err(e) => {
                             eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
@@ -837,7 +1704,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let mut tm = token_manager.write().await;
                     match tm.logout() {
                         Ok(()) => {
-                            println!(r#"{{"status":"success","message":"Logged out"}}"#);
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Logged out"}}"#);
+                            }
                         }
                         Err(e) => {
                             eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
@@ -848,7 +1717,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 AuthCommands::Status => {
                     let tm = token_manager.read().await;
                     let status = tm.status();
-                    println!("{}", serde_json::to_string_pretty(&status).unwrap());
+                    if !quiet {
+                        println!("{}", serde_json::to_string_pretty(&status).unwrap());
+                    }
                 }
             }
         }

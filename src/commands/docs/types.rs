@@ -165,6 +165,22 @@ pub struct BatchUpdateRequest {
 pub struct Request {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub insert_text: Option<InsertTextRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replace_all_text: Option<ReplaceAllTextRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceAllTextRequest {
+    pub contains_text: SubstringMatchCriteria,
+    pub replace_text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubstringMatchCriteria {
+    pub text: String,
+    pub match_case: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -182,7 +198,7 @@ pub struct Location {
     pub segment_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchUpdateResponse {
     pub document_id: String,
