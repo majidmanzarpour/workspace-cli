@@ -752,7 +752,15 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         label_ids: label.map(|l| vec![l]),
                         page_token: None,
                     };
-                    match workspace_cli::commands::gmail::list::list_messages(&client, params).await {
+                    // Get access token for batch metadata request
+                    let access_token = {
+                        let tm = token_manager.read().await;
+                        tm.get_access_token().await.map_err(|e| {
+                            eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
+                            std::process::exit(1);
+                        }).unwrap()
+                    };
+                    match workspace_cli::commands::gmail::list::list_messages_with_metadata(&client, params, &access_token).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;

@@ -65,6 +65,32 @@ pub struct MessageRef {
     pub thread_id: String,
 }
 
+/// Enriched message summary with headers (used by list with metadata)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSummary {
+    pub id: String,
+    pub thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+}
+
+/// Enriched list response with message metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrichedListResponse {
+    #[serde(default)]
+    pub messages: Vec<MessageSummary>,
+    pub next_page_token: Option<String>,
+    pub result_size_estimate: Option<u64>,
+}
+
 // For sending emails
 #[derive(Debug, Clone, Serialize)]
 pub struct SendMessageRequest {
