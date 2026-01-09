@@ -1987,9 +1987,20 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Auth { command } => {
             match command {
                 AuthCommands::Login { credentials } => {
+                    let creds_path = credentials.map(std::path::PathBuf::from);
                     let mut tm = token_manager.write().await;
-                    match tm.login_interactive(credentials.map(std::path::PathBuf::from)).await {
+                    match tm.login_interactive(creds_path.clone()).await {
                         Ok(()) => {
+                            // Save credentials path to config for future use
+                            if let Some(path) = creds_path {
+                                // Canonicalize to absolute path
+                                let abs_path = std::fs::canonicalize(&path).unwrap_or(path);
+                                let mut config = workspace_cli::config::Config::load();
+                                config.auth.credentials_path = Some(abs_path);
+                                if let Err(e) = config.save() {
+                                    eprintln!(r#"{{"status":"warning","message":"Login succeeded but failed to save config: {}"}}"#, e);
+                                }
+                            }
                             if !quiet {
                                 println!(r#"{{"status":"success","message":"Login successful"}}"#);
                             }
