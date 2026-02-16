@@ -237,6 +237,10 @@ chat unread --type DIRECT_MESSAGE                           # Unread DMs only (l
 chat unread --type DIRECT_MESSAGE --since 30d               # Unread DMs from last 30 days
 chat unread --type all --since all                          # All space types, no time limit
 chat unread --include-muted                                 # Include muted spaces (skipped by default)
+chat mark-read --space <id>                                 # Mark single space as read (now)
+chat mark-read --space <id> --time <RFC-3339>               # Mark read at specific time
+chat mark-read --all                                        # Mark ALL unread spaces as read
+chat mark-read --all --type DIRECT_MESSAGE --since 30d      # Mark all unread DMs as read
 ```
 
 **Note:** `chat unread` uses a multi-stage optimization pipeline:
@@ -332,6 +336,8 @@ echo '<json>' | batch gmail               # Read from stdin
 | "unread chats" / "new messages" | `chat unread` |
 | "unread DMs" / "new direct messages" | `chat unread --type DIRECT_MESSAGE` |
 | "all unread" / "everything unread" | `chat unread --type all --since all` |
+| "mark chat read" / "dismiss chat" | `chat mark-read --space <id>` |
+| "mark all chats read" / "clear unread" | `chat mark-read --all` |
 | "chat spaces" / "list rooms" | `chat spaces-list` |
 | "messages in room" | `chat messages-list --space <id>` |
 | "send chat" / "message room" | `chat send --space <id> --text "..."` |

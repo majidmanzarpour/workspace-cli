@@ -20,7 +20,7 @@ pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/chat.spaces",
     "https://www.googleapis.com/auth/chat.messages",
     "https://www.googleapis.com/auth/chat.memberships",
-    "https://www.googleapis.com/auth/chat.users.readstate.readonly",
+    "https://www.googleapis.com/auth/chat.users.readstate",
     "https://www.googleapis.com/auth/chat.users.spacesettings",
     "https://www.googleapis.com/auth/contacts",
     "https://www.googleapis.com/auth/directory.readonly",

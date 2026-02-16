@@ -30,6 +30,17 @@ pub async fn get_thread_read_state(client: &ApiClient, space_name: &str, thread_
     client.get(&path).await
 }
 
+pub async fn update_space_read_state(client: &ApiClient, space_name: &str, last_read_time: &str) -> Result<SpaceReadState> {
+    let space = if space_name.starts_with("spaces/") {
+        space_name.to_string()
+    } else {
+        format!("spaces/{}", space_name)
+    };
+    let path = format!("/users/me/{}/spaceReadState?updateMask=lastReadTime", space);
+    let body = serde_json::json!({ "lastReadTime": last_read_time });
+    client.patch(&path, &body).await
+}
+
 pub async fn get_notification_setting(client: &ApiClient, space_name: &str) -> Result<SpaceNotificationSetting> {
     let space = if space_name.starts_with("spaces/") {
         space_name.to_string()

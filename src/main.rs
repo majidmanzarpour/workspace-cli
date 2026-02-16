@@ -822,6 +822,24 @@ enum ChatCommands {
         #[arg(long, default_value = "false")]
         include_muted: bool,
     },
+    /// Mark a space as read (set lastReadTime to now or specific timestamp)
+    MarkRead {
+        /// Space name (e.g. spaces/abc123). Omit for --all mode
+        #[arg(long)]
+        space: Option<String>,
+        /// Mark all currently unread spaces as read
+        #[arg(long, default_value = "false")]
+        all: bool,
+        /// Specific timestamp to mark as read (RFC-3339). Default: now
+        #[arg(long)]
+        time: Option<String>,
+        /// Space type filter for --all mode
+        #[arg(long, default_value = "SPACE")]
+        r#type: String,
+        /// Since filter for --all mode
+        #[arg(long, default_value = "7d")]
+        since: String,
+    },
     /// Send a message to a space
     Send {
         /// Space name (e.g. spaces/abc123)
@@ -2439,6 +2457,53 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             } else { formatter.write(&result)?; }
                         }
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::MarkRead { space, all, time, r#type, since } => {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let read_time = time.as_deref().unwrap_or(&now);
+
+                    if all {
+                        // Bulk mode: find all unread spaces, then mark them read
+                        let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
+                        match workspace_cli::commands::chat::read_state::get_unread_messages(&client, 1, type_filter, &since, false).await {
+                            Ok(result) => {
+                                let mut marked = 0usize;
+                                for us in &result.spaces {
+                                    if let Some(ref sn) = us.space_name {
+                                        // Use the latest message time or now
+                                        let mark_time = us.messages.first()
+                                            .and_then(|m| m.create_time.as_deref())
+                                            .unwrap_or(read_time);
+                                        if let Ok(_) = workspace_cli::commands::chat::read_state::update_space_read_state(&client, sn, mark_time).await {
+                                            marked += 1;
+                                            eprintln!("Marked read: {} ({})", us.display_name.as_deref().unwrap_or(sn), mark_time);
+                                        }
+                                    }
+                                }
+                                let summary = serde_json::json!({ "status": "ok", "spacesMarkedRead": marked });
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&summary)?;
+                                } else { formatter.write(&summary)?; }
+                            }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        }
+                    } else if let Some(ref space_name) = space {
+                        match workspace_cli::commands::chat::read_state::update_space_read_state(&client, space_name, read_time).await {
+                            Ok(state) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&state)?;
+                                } else { formatter.write(&state)?; }
+                            }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        }
+                    } else {
+                        eprintln!(r#"{{"status":"error","message":"Provide --space or --all"}}"#);
+                        std::process::exit(1);
                     }
                 }
                 ChatCommands::Send { space, text, thread } => {
