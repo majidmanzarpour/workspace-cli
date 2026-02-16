@@ -16,6 +16,9 @@ pub mod endpoints {
     pub const SHEETS: &str = "https://sheets.googleapis.com/v4";
     pub const SLIDES: &str = "https://slides.googleapis.com/v1";
     pub const TASKS: &str = "https://tasks.googleapis.com/tasks/v1";
+    pub const CHAT: &str = "https://chat.googleapis.com/v1";
+    pub const CONTACTS: &str = "https://people.googleapis.com/v1";
+    pub const GROUPS: &str = "https://cloudidentity.googleapis.com/v1";
 }
 
 /// Google Workspace API client
@@ -117,6 +120,30 @@ impl ApiClient {
     pub fn tasks(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
         Self::new(token_manager)
             .with_base_url(endpoints::TASKS)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    /// Create a Google Chat client
+    pub fn chat(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::CHAT)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    /// Create a Google Contacts (People API) client
+    pub fn contacts(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::CONTACTS)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    /// Create a Google Groups (Cloud Identity) client
+    pub fn groups(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::GROUPS)
             .with_rate_limiter(ApiRateLimiter::tasks())
             .with_retry_config(RetryConfig::default())
     }
