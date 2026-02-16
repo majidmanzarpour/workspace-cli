@@ -818,6 +818,9 @@ enum ChatCommands {
         /// Only check spaces active within this period (e.g. 1d, 7d, 30d, all). Default: 7d
         #[arg(long, default_value = "7d")]
         since: String,
+        /// Include muted spaces (skipped by default)
+        #[arg(long, default_value = "false")]
+        include_muted: bool,
     },
     /// Send a message to a space
     Send {
@@ -2425,9 +2428,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
                 }
-                ChatCommands::Unread { limit, r#type, since } => {
+                ChatCommands::Unread { limit, r#type, since, include_muted } => {
                     let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
-                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter, &since).await {
+                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter, &since, include_muted).await {
                         Ok(result) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;

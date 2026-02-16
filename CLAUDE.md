@@ -236,17 +236,20 @@ chat unread [--limit 10] [--type SPACE]                     # Show unread messag
 chat unread --type DIRECT_MESSAGE                           # Unread DMs only (last 7 days)
 chat unread --type DIRECT_MESSAGE --since 30d               # Unread DMs from last 30 days
 chat unread --type all --since all                          # All space types, no time limit
+chat unread --include-muted                                 # Include muted spaces (skipped by default)
 ```
 
 **Note:** `chat unread` uses a multi-stage optimization pipeline:
 1. Server-side `spaceType` filter reduces API calls
 2. `--since` flag (default: 7d) filters by `lastActiveTime` before any read state fetches
-3. `lastActiveTime` vs `lastReadTime` comparison skips already-read spaces
-4. Read states fetched concurrently in batches of 50, bot DMs filtered out
-5. Messages fetched only for spaces with confirmed unread activity
+3. Muted spaces skipped by default (fetched via `spaceNotificationSetting` in parallel)
+4. `lastActiveTime` vs `lastReadTime` comparison skips already-read spaces
+5. Read states + notification settings fetched concurrently in batches of 50, bot DMs filtered out
+6. Messages fetched only for spaces with confirmed unread activity
 
 The `--type` flag accepts: SPACE (default), DIRECT_MESSAGE, GROUP_CHAT, or all.
 The `--since` flag accepts: 1d, 7d, 30d, or all (no limit).
+The `--include-muted` flag includes muted spaces (skipped by default).
 
 ### Contacts Commands
 ```bash

@@ -115,6 +115,15 @@ pub struct UnreadResult {
     pub total_unread_messages: usize,
 }
 
+// Notification settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceNotificationSetting {
+    pub name: Option<String>,
+    pub notification_setting: Option<String>,
+    pub mute_setting: Option<String>,
+}
+
 // Request types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

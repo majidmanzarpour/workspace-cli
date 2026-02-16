@@ -1,6 +1,6 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{SpaceReadState, ThreadReadState, UnreadResult, UnreadSpace, Space};
+use super::types::{SpaceReadState, ThreadReadState, SpaceNotificationSetting, UnreadResult, UnreadSpace, Space};
 use super::spaces::{list_spaces, ListSpacesParams};
 use super::messages::{list_messages, ListMessagesParams};
 use futures::future::join_all;
@@ -30,6 +30,16 @@ pub async fn get_thread_read_state(client: &ApiClient, space_name: &str, thread_
     client.get(&path).await
 }
 
+pub async fn get_notification_setting(client: &ApiClient, space_name: &str) -> Result<SpaceNotificationSetting> {
+    let space = if space_name.starts_with("spaces/") {
+        space_name.to_string()
+    } else {
+        format!("spaces/{}", space_name)
+    };
+    let path = format!("/users/me/{}/spaceNotificationSetting", space);
+    client.get(&path).await
+}
+
 fn parse_since_to_cutoff(since: &str) -> Option<String> {
     if since == "all" { return None; }
     let days: u64 = if since.ends_with('d') {
@@ -41,7 +51,7 @@ fn parse_since_to_cutoff(since: &str) -> Option<String> {
     Some(cutoff.to_rfc3339())
 }
 
-pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space_type_filter: Option<&str>, since: &str) -> Result<UnreadResult> {
+pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space_type_filter: Option<&str>, since: &str, include_muted: bool) -> Result<UnreadResult> {
     // Step 1: List spaces with server-side spaceType filter
     let api_filter = match space_type_filter {
         Some("all") | None => None,
@@ -58,9 +68,8 @@ pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space
     let spaces: Vec<&Space> = spaces_response.spaces.iter()
         .filter(|s| s.name.is_some())
         .filter(|s| !s.single_user_bot_dm.unwrap_or(false))
-        .filter(|s| s.last_active_time.is_some()) // No activity = no unread
+        .filter(|s| s.last_active_time.is_some())
         .filter(|s| {
-            // Skip spaces with no activity since cutoff
             match (&since_cutoff, &s.last_active_time) {
                 (Some(cutoff), Some(active)) => active.as_str() >= cutoff.as_str(),
                 _ => true,
@@ -70,37 +79,49 @@ pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space
 
     eprintln!("Checking {} spaces for unread messages...", spaces.len());
 
-    // Step 3: Fetch read states concurrently (batches of 50)
+    // Step 3: Fetch read states + notification settings concurrently (batches of 50)
     let mut unread_spaces: Vec<UnreadSpace> = Vec::new();
     let mut total_messages = 0usize;
+    let mut muted_count = 0usize;
 
     for chunk in spaces.chunks(50) {
-        // Concurrently fetch read states
-        let read_state_futures: Vec<_> = chunk.iter().map(|space| {
+        // Fire read state AND notification setting calls in parallel per space
+        let combined_futures: Vec<_> = chunk.iter().map(|space| {
             let space_name = space.name.as_ref().unwrap().clone();
             async move {
-                let rs = get_space_read_state(client, &space_name).await;
-                (space_name, rs)
+                let (rs, ns) = tokio::join!(
+                    get_space_read_state(client, &space_name),
+                    get_notification_setting(client, &space_name)
+                );
+                (space_name, rs, ns)
             }
         }).collect();
 
-        let read_states = join_all(read_state_futures).await;
+        let results = join_all(combined_futures).await;
 
-        // Step 4: Compare lastActiveTime vs lastReadTime — skip already-read spaces
+        // Step 4: Filter by mute state, then compare lastActiveTime vs lastReadTime
         let mut needs_messages = Vec::new();
-        for (space_name, rs_result) in &read_states {
+        for (space_name, rs_result, ns_result) in &results {
+            // Skip muted spaces unless --include-muted
+            if !include_muted {
+                if let Ok(ns) = ns_result {
+                    if ns.mute_setting.as_deref() == Some("MUTED") {
+                        muted_count += 1;
+                        continue;
+                    }
+                }
+            }
+
             if let Ok(rs) = rs_result {
                 if let Some(ref last_read) = rs.last_read_time {
                     if last_read.is_empty() { continue; }
 
-                    // Find space metadata
                     let space_meta = chunk.iter().find(|s| s.name.as_deref() == Some(space_name.as_str()));
 
-                    // If lastActiveTime available, skip spaces where lastActiveTime <= lastReadTime
                     if let Some(meta) = space_meta {
                         if let Some(ref last_active) = meta.last_active_time {
                             if last_active <= last_read {
-                                continue; // Already read — skip message fetch
+                                continue;
                             }
                         }
                     }
@@ -145,6 +166,10 @@ pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space
                 }
             }
         }
+    }
+
+    if muted_count > 0 {
+        eprintln!("Skipped {} muted spaces (use --include-muted to include)", muted_count);
     }
 
     let total_spaces = unread_spaces.len();
