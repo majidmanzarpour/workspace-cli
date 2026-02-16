@@ -2502,10 +2502,11 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
             match command {
                 GroupsCommands::List { email, limit } => {
+                    let admin_client = ApiClient::admin(token_manager.clone());
                     let params = workspace_cli::commands::groups::list::ListGroupsParams {
                         email, page_size: limit, page_token: None,
                     };
-                    match workspace_cli::commands::groups::list::list_groups(&client, params).await {
+                    match workspace_cli::commands::groups::list::list_groups(&admin_client, params).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;

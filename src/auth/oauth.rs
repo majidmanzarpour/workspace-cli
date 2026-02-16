@@ -23,6 +23,7 @@ pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/contacts",
     "https://www.googleapis.com/auth/directory.readonly",
     "https://www.googleapis.com/auth/cloud-identity.groups.readonly",
+    "https://www.googleapis.com/auth/admin.directory.group.readonly",
 ];
 
 pub type WorkspaceAuthenticator = Authenticator<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;

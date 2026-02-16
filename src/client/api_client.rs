@@ -19,6 +19,7 @@ pub mod endpoints {
     pub const CHAT: &str = "https://chat.googleapis.com/v1";
     pub const CONTACTS: &str = "https://people.googleapis.com/v1";
     pub const GROUPS: &str = "https://cloudidentity.googleapis.com/v1";
+    pub const ADMIN: &str = "https://admin.googleapis.com/admin/directory/v1";
 }
 
 /// Google Workspace API client
@@ -144,6 +145,13 @@ impl ApiClient {
     pub fn groups(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
         Self::new(token_manager)
             .with_base_url(endpoints::GROUPS)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    pub fn admin(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::ADMIN)
             .with_rate_limiter(ApiRateLimiter::tasks())
             .with_retry_config(RetryConfig::default())
     }

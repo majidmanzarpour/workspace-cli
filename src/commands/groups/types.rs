@@ -1,28 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-// Groups list response (from searchTransitiveGroups)
+// Admin Directory API groups list response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TransitiveGroupsResponse {
+pub struct DirectoryGroupsResponse {
     #[serde(default)]
-    pub memberships: Vec<GroupRelation>,
+    pub groups: Vec<DirectoryGroup>,
     pub next_page_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GroupRelation {
-    pub group_key: Option<EntityKey>,
-    pub display_name: Option<String>,
-    pub group: Option<String>,
-    pub relation_type: Option<String>,
-    pub roles: Option<Vec<TransitiveMembershipRole>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransitiveMembershipRole {
-    pub role: Option<String>,
+pub struct DirectoryGroup {
+    pub id: Option<String>,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub direct_members_count: Option<String>,
+    pub admin_created: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
