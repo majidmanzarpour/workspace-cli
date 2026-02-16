@@ -78,6 +78,41 @@ pub struct MembershipListResponse {
     pub next_page_token: Option<String>,
 }
 
+// Read state types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceReadState {
+    pub name: Option<String>,
+    pub last_read_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadReadState {
+    pub name: Option<String>,
+    pub last_read_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadSpace {
+    pub space_name: Option<String>,
+    pub display_name: Option<String>,
+    pub space_type: Option<String>,
+    pub last_read_time: Option<String>,
+    #[serde(default)]
+    pub messages: Vec<Message>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadResult {
+    #[serde(default)]
+    pub spaces: Vec<UnreadSpace>,
+    pub total_unread_spaces: usize,
+    pub total_unread_messages: usize,
+}
+
 // Request types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

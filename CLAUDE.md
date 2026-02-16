@@ -55,6 +55,9 @@ src/
 │   ├── sheets/          # get, update, append, create, clear
 │   ├── slides/          # get presentation/page
 │   ├── tasks/           # lists, list, create, update, delete
+│   ├── chat/            # spaces, messages, read_state (unread detection)
+│   ├── contacts/        # list, search, create, delete, directory
+│   ├── groups/          # list (Admin SDK), members (Cloud Identity)
 │   └── batch/           # CLI wrapper for batch API requests
 ├── config/              # Config file handling (~/.config/workspace-cli/)
 ├── error/               # Structured error types (CliError, WorkspaceError)
@@ -74,6 +77,10 @@ ApiClient::docs(token_manager)     // Docs API client
 ApiClient::sheets(token_manager)   // Sheets API client
 ApiClient::slides(token_manager)   // Slides API client
 ApiClient::tasks(token_manager)    // Tasks API client
+ApiClient::chat(token_manager)     // Chat API client
+ApiClient::contacts(token_manager) // Contacts (People API) client
+ApiClient::groups(token_manager)   // Groups (Cloud Identity) client
+ApiClient::admin(token_manager)    // Admin SDK Directory client
 ```
 
 ### API Endpoints (`src/client/api_client.rs:11-19`)
@@ -85,6 +92,10 @@ DOCS:     "https://docs.googleapis.com/v1"
 SHEETS:   "https://sheets.googleapis.com/v4"
 SLIDES:   "https://slides.googleapis.com/v1"
 TASKS:    "https://tasks.googleapis.com/tasks/v1"
+CHAT:     "https://chat.googleapis.com/v1"
+CONTACTS: "https://people.googleapis.com/v1"
+GROUPS:   "https://cloudidentity.googleapis.com/v1"
+ADMIN:    "https://admin.googleapis.com/admin/directory/v1"
 ```
 
 ### Output Formatter (`src/output/formatter.rs`)
@@ -209,6 +220,42 @@ tasks delete <id> [--list @default]
 
 **Token Optimization:** `tasks list` returns minimal task fields (id, title, status, due, notes, completed) by default (~40% reduction). Use `--full` for etag, selfLink, links, parent, position, etc.
 
+### Chat Commands
+```bash
+chat spaces-list [--limit 100]                              # List all Chat spaces
+chat spaces-find --name <name>                              # Find space by display name
+chat spaces-create --name <name> --member <email>           # Create a space with members
+chat messages-list --space <id> [--limit 25] [--order desc] # List messages (newest first by default)
+chat messages-list --space <id> --after <RFC-3339>          # Messages after timestamp
+chat messages-list --space <id> --before <RFC-3339>         # Messages before timestamp
+chat send --space <id> --text <text> [--thread <thread>]    # Send message (optionally in thread)
+chat get <message-name>                                     # Get a specific message
+chat read-state --space <id>                                # Get space read state (lastReadTime)
+chat thread-read-state --space <id> --thread <thread>       # Get thread read state
+chat unread [--limit 10] [--type SPACE]                     # Show unread messages across spaces
+chat unread --type DIRECT_MESSAGE                           # Unread DMs only
+chat unread --type all                                      # All space types
+```
+
+**Note:** `chat unread` fetches read states concurrently in batches of 10, filters out bot DMs. The `--type` flag accepts: SPACE (default), DIRECT_MESSAGE, GROUP_CHAT, or all.
+
+### Contacts Commands
+```bash
+contacts list [--limit 100]                                 # List personal contacts
+contacts search --query <q>                                 # Search contacts by name/email
+contacts get <resourceName>                                 # Get a specific contact
+contacts create --given <name> --email <email>              # Create a contact
+contacts delete <resourceName>                              # Delete a contact
+contacts directory-list [--limit 100]                       # List domain directory people
+contacts directory-search --query <q>                       # Search domain directory
+```
+
+### Groups Commands
+```bash
+groups list [--email <email>] [--limit 200]                 # List groups for user (Admin SDK)
+groups members <groupEmail> [--limit 200]                   # List group members (Cloud Identity)
+```
+
 ### Batch Commands
 Execute up to 100 API requests in a single HTTP call:
 ```bash
@@ -270,6 +317,17 @@ echo '<json>' | batch gmail               # Read from stdin
 | "my tasks" / "todo list" | `tasks list` |
 | "add task" | `tasks create "title"` |
 | "complete task" | `tasks update <id> --complete` |
+| "unread chats" / "new messages" | `chat unread` |
+| "chat spaces" / "list rooms" | `chat spaces-list` |
+| "messages in room" | `chat messages-list --space <id>` |
+| "send chat" / "message room" | `chat send --space <id> --text "..."` |
+| "find chat room" | `chat spaces-find --name "..."` |
+| "my contacts" | `contacts list` |
+| "find contact" | `contacts search --query "..."` |
+| "company directory" | `contacts directory-list` |
+| "search directory" | `contacts directory-search --query "..."` |
+| "my groups" | `groups list` |
+| "group members" | `groups members <email>` |
 | "batch request" / "bulk operation" | `batch gmail/drive/calendar --requests '[...]'` |
 | "get multiple emails at once" | `batch gmail --requests '[{"id":"1","method":"GET","path":"/gmail/v1/users/me/messages/id1"},...]'` |
 | "star all these messages" | `batch gmail --requests '[{"id":"1","method":"POST","path":"/gmail/v1/users/me/messages/id1/modify","body":{"addLabelIds":["STARRED"]}}]'` |

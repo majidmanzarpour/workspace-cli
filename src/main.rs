@@ -782,6 +782,39 @@ enum ChatCommands {
         /// Maximum results
         #[arg(long, default_value = "25")]
         limit: u32,
+        /// Sort order: desc (newest first) or asc (oldest first)
+        #[arg(long, default_value = "desc")]
+        order: String,
+        /// Filter messages created after this time (RFC-3339)
+        #[arg(long)]
+        after: Option<String>,
+        /// Filter messages created before this time (RFC-3339)
+        #[arg(long)]
+        before: Option<String>,
+    },
+    /// Get read state for a space (shows lastReadTime)
+    ReadState {
+        /// Space name (e.g. spaces/abc123)
+        #[arg(long)]
+        space: String,
+    },
+    /// Get read state for a thread
+    ThreadReadState {
+        /// Space name
+        #[arg(long)]
+        space: String,
+        /// Thread name
+        #[arg(long)]
+        thread: String,
+    },
+    /// Show unread messages across all spaces
+    Unread {
+        /// Maximum messages per space
+        #[arg(long, default_value = "10")]
+        limit: u32,
+        /// Filter by space type: SPACE, DIRECT_MESSAGE, GROUP_CHAT, or all
+        #[arg(long, default_value = "SPACE")]
+        r#type: String,
     },
     /// Send a message to a space
     Send {
@@ -2337,10 +2370,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
                 }
-                ChatCommands::MessagesList { space, limit } => {
-                    let params = workspace_cli::commands::chat::messages::ListMessagesParams::new(&space);
+                ChatCommands::MessagesList { space, limit, order, after, before } => {
+                    let order_by = format!("createTime {}", if order.to_lowercase() == "asc" { "ASC" } else { "DESC" });
+                    let mut filter_parts: Vec<String> = Vec::new();
+                    if let Some(ref t) = after {
+                        filter_parts.push(format!("createTime > \"{}\"", t));
+                    }
+                    if let Some(ref t) = before {
+                        filter_parts.push(format!("createTime < \"{}\"", t));
+                    }
+                    let filter = if filter_parts.is_empty() { None } else { Some(filter_parts.join(" AND ")) };
                     let params = workspace_cli::commands::chat::messages::ListMessagesParams {
-                        page_size: limit, ..params
+                        space_name: space,
+                        page_size: limit,
+                        page_token: None,
+                        order_by: Some(order_by),
+                        filter,
                     };
                     match workspace_cli::commands::chat::messages::list_messages(&client, params).await {
                         Ok(response) => {
@@ -2349,6 +2394,43 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 ff.write(&response)?;
                             } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::ReadState { space } => {
+                    match workspace_cli::commands::chat::read_state::get_space_read_state(&client, &space).await {
+                        Ok(state) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&state)?;
+                            } else { formatter.write(&state)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::ThreadReadState { space, thread } => {
+                    match workspace_cli::commands::chat::read_state::get_thread_read_state(&client, &space, &thread).await {
+                        Ok(state) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&state)?;
+                            } else { formatter.write(&state)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::Unread { limit, r#type } => {
+                    let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
+                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter).await {
+                        Ok(result) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&result)?;
+                            } else { formatter.write(&result)?; }
                         }
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
