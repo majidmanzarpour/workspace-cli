@@ -9,6 +9,8 @@ pub struct Space {
     pub space_uri: Option<String>,
     pub space_threading_state: Option<String>,
     pub single_user_bot_dm: Option<bool>,
+    pub last_active_time: Option<String>,
+    pub membership_count: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

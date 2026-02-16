@@ -233,11 +233,20 @@ chat get <message-name>                                     # Get a specific mes
 chat read-state --space <id>                                # Get space read state (lastReadTime)
 chat thread-read-state --space <id> --thread <thread>       # Get thread read state
 chat unread [--limit 10] [--type SPACE]                     # Show unread messages across spaces
-chat unread --type DIRECT_MESSAGE                           # Unread DMs only
-chat unread --type all                                      # All space types
+chat unread --type DIRECT_MESSAGE                           # Unread DMs only (last 7 days)
+chat unread --type DIRECT_MESSAGE --since 30d               # Unread DMs from last 30 days
+chat unread --type all --since all                          # All space types, no time limit
 ```
 
-**Note:** `chat unread` fetches read states concurrently in batches of 10, filters out bot DMs. The `--type` flag accepts: SPACE (default), DIRECT_MESSAGE, GROUP_CHAT, or all.
+**Note:** `chat unread` uses a multi-stage optimization pipeline:
+1. Server-side `spaceType` filter reduces API calls
+2. `--since` flag (default: 7d) filters by `lastActiveTime` before any read state fetches
+3. `lastActiveTime` vs `lastReadTime` comparison skips already-read spaces
+4. Read states fetched concurrently in batches of 50, bot DMs filtered out
+5. Messages fetched only for spaces with confirmed unread activity
+
+The `--type` flag accepts: SPACE (default), DIRECT_MESSAGE, GROUP_CHAT, or all.
+The `--since` flag accepts: 1d, 7d, 30d, or all (no limit).
 
 ### Contacts Commands
 ```bash
@@ -318,6 +327,8 @@ echo '<json>' | batch gmail               # Read from stdin
 | "add task" | `tasks create "title"` |
 | "complete task" | `tasks update <id> --complete` |
 | "unread chats" / "new messages" | `chat unread` |
+| "unread DMs" / "new direct messages" | `chat unread --type DIRECT_MESSAGE` |
+| "all unread" / "everything unread" | `chat unread --type all --since all` |
 | "chat spaces" / "list rooms" | `chat spaces-list` |
 | "messages in room" | `chat messages-list --space <id>` |
 | "send chat" / "message room" | `chat send --space <id> --text "..."` |

@@ -5,11 +5,12 @@ use super::types::{Space, SpaceListResponse, SetupSpaceRequest, SpaceSetup, Memb
 pub struct ListSpacesParams {
     pub page_size: u32,
     pub page_token: Option<String>,
+    pub filter: Option<String>,
 }
 
 impl Default for ListSpacesParams {
     fn default() -> Self {
-        Self { page_size: 100, page_token: None }
+        Self { page_size: 100, page_token: None, filter: None }
     }
 }
 
@@ -19,6 +20,9 @@ pub async fn list_spaces(client: &ApiClient, params: ListSpacesParams) -> Result
     ];
     if let Some(ref token) = params.page_token {
         query.push(("pageToken", token.clone()));
+    }
+    if let Some(ref f) = params.filter {
+        query.push(("filter", f.clone()));
     }
     client.get_with_query("/spaces", &query).await
 }
@@ -54,7 +58,7 @@ pub async fn create_space(client: &ApiClient, display_name: &str, member_emails:
 }
 
 pub async fn find_space_by_name(client: &ApiClient, name: &str) -> Result<Vec<Space>> {
-    let response: SpaceListResponse = list_spaces(client, ListSpacesParams { page_size: 200, page_token: None }).await?;
+    let response: SpaceListResponse = list_spaces(client, ListSpacesParams { page_size: 200, page_token: None, filter: None }).await?;
     let name_lower = name.to_lowercase();
     let matches: Vec<Space> = response.spaces.into_iter()
         .filter(|s| s.display_name.as_ref().map(|n| n.to_lowercase().contains(&name_lower)).unwrap_or(false))

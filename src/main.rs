@@ -815,6 +815,9 @@ enum ChatCommands {
         /// Filter by space type: SPACE, DIRECT_MESSAGE, GROUP_CHAT, or all
         #[arg(long, default_value = "SPACE")]
         r#type: String,
+        /// Only check spaces active within this period (e.g. 1d, 7d, 30d, all). Default: 7d
+        #[arg(long, default_value = "7d")]
+        since: String,
     },
     /// Send a message to a space
     Send {
@@ -2333,7 +2336,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             match command {
                 ChatCommands::SpacesList { limit } => {
                     let params = workspace_cli::commands::chat::spaces::ListSpacesParams {
-                        page_size: limit, page_token: None,
+                        page_size: limit, page_token: None, filter: None,
                     };
                     match workspace_cli::commands::chat::spaces::list_spaces(&client, params).await {
                         Ok(response) => {
@@ -2422,9 +2425,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
                 }
-                ChatCommands::Unread { limit, r#type } => {
+                ChatCommands::Unread { limit, r#type, since } => {
                     let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
-                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter).await {
+                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter, &since).await {
                         Ok(result) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
