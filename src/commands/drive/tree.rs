@@ -27,6 +27,18 @@ pub struct TreeNode {
     pub permissions: Vec<TreePermission>,
     #[serde(rename = "driveId", skip_serializing_if = "Option::is_none")]
     pub shared_drive_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewed_by_me_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shortcut_details: Option<TreeShortcutDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeShortcutDetails {
+    pub target_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +91,13 @@ impl TreeNode {
             shared: file.shared.unwrap_or(false),
             permissions,
             shared_drive_id,
+            viewed_by_me_time: file.viewed_by_me_time.clone(),
+            shortcut_details: file.shortcut_details.as_ref().and_then(|sd| {
+                sd.target_id.as_ref().map(|tid| TreeShortcutDetails {
+                    target_id: tid.clone(),
+                    target_mime_type: sd.target_mime_type.clone(),
+                })
+            }),
         }
     }
 

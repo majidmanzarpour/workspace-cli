@@ -1023,6 +1023,24 @@ enum AdminCommands {
         /// User email or ID
         user_key: String,
     },
+    /// Query Drive audit events from Admin Reports API
+    ReportsDriveActivity {
+        /// Event name to filter (view, edit, download, print, preview)
+        #[arg(long, default_value = "view")]
+        event_name: String,
+        /// Start time (ISO 8601, e.g. 2025-08-01T00:00:00Z)
+        #[arg(long)]
+        start_time: Option<String>,
+        /// End time (ISO 8601, e.g. 2026-02-17T00:00:00Z)
+        #[arg(long)]
+        end_time: Option<String>,
+        /// Filter expression (e.g. doc_id==FILE_ID)
+        #[arg(long)]
+        filters: Option<String>,
+        /// Max results per page (max 1000)
+        #[arg(long, default_value = "1000")]
+        max_results: u32,
+    },
 }
 
 #[tokio::main]
@@ -2900,6 +2918,23 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
                                 ff.write(&response)?;
                             } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                AdminCommands::ReportsDriveActivity { event_name, start_time, end_time, filters, max_results } => {
+                    let reports_client = ApiClient::admin_reports(token_manager.clone());
+                    let params = workspace_cli::commands::admin::reports::DriveActivityParams {
+                        event_name, start_time, end_time, filters, max_results,
+                    };
+                    match workspace_cli::commands::admin::reports::list_drive_activity(&reports_client, params).await {
+                        Ok(events) => {
+                            eprintln!("Total events: {}", events.len());
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&events)?;
+                            } else { formatter.write(&events)?; }
                         }
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }

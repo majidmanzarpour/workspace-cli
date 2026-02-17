@@ -27,7 +27,7 @@ impl Default for ListParams {
 }
 
 /// Default fields for Drive file listing
-const DEFAULT_FILE_FIELDS: &str = "id,name,mimeType,owners(emailAddress),createdTime,modifiedTime,size,parents,shared";
+const DEFAULT_FILE_FIELDS: &str = "id,name,mimeType,owners(emailAddress),createdTime,modifiedTime,viewedByMeTime,size,parents,shared,shortcutDetails(targetId,targetMimeType)";
 const PERMISSION_FIELDS: &str = ",permissions(id,type,role,emailAddress,domain),driveId";
 
 pub async fn list_files(client: &ApiClient, params: ListParams) -> Result<FileList> {

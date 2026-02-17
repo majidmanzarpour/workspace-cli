@@ -21,6 +21,15 @@ pub struct File {
     pub sharing_user: Option<FileOwner>,
     #[serde(default)]
     pub permissions: Vec<FilePermission>,
+    pub viewed_by_me_time: Option<String>,
+    pub shortcut_details: Option<ShortcutDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutDetails {
+    pub target_id: Option<String>,
+    pub target_mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

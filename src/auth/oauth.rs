@@ -68,6 +68,7 @@ pub fn scopes_for_service(service: &str) -> &'static [&'static str] {
         ],
         "admin" => &[
             "https://www.googleapis.com/auth/admin.directory.user.readonly",
+            "https://www.googleapis.com/auth/admin.reports.audit.readonly",
         ],
         _ => SCOPES,
     }
