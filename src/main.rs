@@ -1006,6 +1006,24 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         tm.set_subject(Some(email.clone()));
     }
 
+    // Set service for per-service scope selection (used with --as)
+    let service_name = match &cli.command {
+        Commands::Gmail { .. } => "gmail",
+        Commands::Drive { .. } => "drive",
+        Commands::Calendar { .. } => "calendar",
+        Commands::Docs { .. } => "docs",
+        Commands::Sheets { .. } => "sheets",
+        Commands::Slides { .. } => "slides",
+        Commands::Tasks { .. } => "tasks",
+        Commands::Chat { .. } => "chat",
+        Commands::Contacts { .. } => "contacts",
+        Commands::Groups { .. } => "groups",
+        Commands::Admin { .. } => "admin",
+        Commands::Batch { .. } => "drive",
+        Commands::Auth { .. } => "drive",
+    };
+    tm.set_service(service_name);
+
     let token_manager = Arc::new(RwLock::new(tm));
 
     // Determine output format

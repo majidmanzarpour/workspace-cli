@@ -9,6 +9,7 @@ use yup_oauth2::{
 };
 
 /// All scopes needed for Google Workspace APIs
+/// All scopes for interactive OAuth flow (user consents to all at once)
 pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/drive",
@@ -28,6 +29,49 @@ pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/admin.directory.group.readonly",
     "https://www.googleapis.com/auth/admin.directory.user.readonly",
 ];
+
+/// Get scopes for a specific service (used with --as to request only needed scopes)
+pub fn scopes_for_service(service: &str) -> &'static [&'static str] {
+    match service {
+        "gmail" => &[
+            "https://mail.google.com/",
+        ],
+        "drive" => &[
+            "https://www.googleapis.com/auth/drive",
+        ],
+        "calendar" => &[
+            "https://www.googleapis.com/auth/calendar",
+        ],
+        "docs" => &[
+            "https://www.googleapis.com/auth/documents",
+            "https://www.googleapis.com/auth/drive",
+        ],
+        "sheets" => &[
+            "https://www.googleapis.com/auth/spreadsheets",
+        ],
+        "slides" => &[
+            "https://www.googleapis.com/auth/presentations",
+        ],
+        "tasks" => &[
+            "https://www.googleapis.com/auth/tasks",
+        ],
+        "chat" => &[
+            "https://www.googleapis.com/auth/chat.spaces",
+            "https://www.googleapis.com/auth/chat.messages",
+            "https://www.googleapis.com/auth/chat.memberships",
+        ],
+        "contacts" => &[
+            "https://www.googleapis.com/auth/contacts",
+        ],
+        "groups" => &[
+            "https://www.googleapis.com/auth/cloud-identity",
+        ],
+        "admin" => &[
+            "https://www.googleapis.com/auth/admin.directory.user.readonly",
+        ],
+        _ => SCOPES,
+    }
+}
 
 pub type WorkspaceAuthenticator = Authenticator<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 
