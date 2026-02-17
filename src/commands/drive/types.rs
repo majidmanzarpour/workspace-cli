@@ -14,6 +14,31 @@ pub struct File {
     pub created_time: Option<String>,
     pub modified_time: Option<String>,
     pub trashed: Option<bool>,
+    #[serde(default)]
+    pub owners: Vec<FileOwner>,
+    pub shared: Option<bool>,
+    pub drive_id: Option<String>,
+    pub sharing_user: Option<FileOwner>,
+    #[serde(default)]
+    pub permissions: Vec<FilePermission>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOwner {
+    pub email_address: Option<String>,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePermission {
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub permission_type: Option<String>,
+    pub role: Option<String>,
+    pub email_address: Option<String>,
+    pub domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

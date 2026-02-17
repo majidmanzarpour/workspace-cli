@@ -8,9 +8,7 @@ pub struct ListParams {
     pub page_token: Option<String>,
     pub order_by: Option<String>,
     pub fields: Option<String>,
-    /// Corpora to search: user, domain, drive, allDrives
     pub corpora: Option<String>,
-    /// Include permissions in response fields
     pub include_permissions: bool,
 }
 
@@ -21,12 +19,16 @@ impl Default for ListParams {
             max_results: 20,
             page_token: None,
             order_by: None,
-            fields: Some("files(id,name,mimeType,webViewLink,modifiedTime)".to_string()),
+            fields: None,
             corpora: None,
             include_permissions: false,
         }
     }
 }
+
+/// Default fields for Drive file listing
+const DEFAULT_FILE_FIELDS: &str = "id,name,mimeType,owners(emailAddress),createdTime,modifiedTime,size,parents,shared";
+const PERMISSION_FIELDS: &str = ",permissions(id,type,role,emailAddress,domain)";
 
 pub async fn list_files(client: &ApiClient, params: ListParams) -> Result<FileList> {
     let mut query_params: Vec<(&str, String)> = vec![
@@ -42,20 +44,23 @@ pub async fn list_files(client: &ApiClient, params: ListParams) -> Result<FileLi
     if let Some(ref order) = params.order_by {
         query_params.push(("orderBy", order.clone()));
     }
+
+    // Build fields parameter with files() wrapper
+    let file_fields = params.fields.as_deref().unwrap_or(DEFAULT_FILE_FIELDS);
+    let fields_str = if params.include_permissions {
+        format!("nextPageToken,incompleteSearch,files({}{})", file_fields, PERMISSION_FIELDS)
+    } else {
+        format!("nextPageToken,incompleteSearch,files({})", file_fields)
+    };
+    query_params.push(("fields", fields_str));
+
     if let Some(ref corpora) = params.corpora {
         query_params.push(("corpora", corpora.clone()));
-        // allDrives requires includeItemsFromAllDrives and supportsAllDrives
-        if corpora == "allDrives" || corpora == "drive" {
-            query_params.push(("includeItemsFromAllDrives", "true".to_string()));
+        // domain/drive/allDrives corpora require these params
+        if corpora != "user" {
             query_params.push(("supportsAllDrives", "true".to_string()));
+            query_params.push(("includeItemsFromAllDrives", "true".to_string()));
         }
-    }
-    if params.include_permissions {
-        let fields_with_perms = params.fields.clone()
-            .unwrap_or_else(|| "files(id,name,mimeType,webViewLink,modifiedTime,permissions(emailAddress,role,type))".to_string());
-        query_params.push(("fields", fields_with_perms));
-    } else if let Some(ref fields) = params.fields {
-        query_params.push(("fields", fields.clone()));
     }
 
     client.get_with_query("/files", &query_params).await

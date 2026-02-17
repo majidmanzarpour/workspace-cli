@@ -1445,7 +1445,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         query: final_query,
                         max_results: limit,
                         page_token: None,
-                        fields: None,
+                        fields: fields.as_ref().map(|f| f.join(",")),
                         order_by: None,
                         corpora,
                         include_permissions,
