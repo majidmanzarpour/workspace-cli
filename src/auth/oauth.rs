@@ -26,6 +26,7 @@ pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/directory.readonly",
     "https://www.googleapis.com/auth/cloud-identity.groups.readonly",
     "https://www.googleapis.com/auth/admin.directory.group.readonly",
+    "https://www.googleapis.com/auth/admin.directory.user.readonly",
 ];
 
 pub type WorkspaceAuthenticator = Authenticator<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
@@ -47,14 +48,20 @@ pub async fn create_installed_flow_auth(
 }
 
 /// Create an authenticator using service account (headless)
+/// When `subject` is provided, uses domain-wide delegation to impersonate that user
 pub async fn create_service_account_auth(
     service_account_path: &Path,
+    subject: Option<&str>,
 ) -> Result<WorkspaceAuthenticator, AuthError> {
     let sa_key = yup_oauth2::read_service_account_key(service_account_path)
         .await
         .map_err(|e| AuthError::InvalidCredentials(e.to_string()))?;
 
-    let auth = ServiceAccountAuthenticator::builder(sa_key)
+    let mut builder = ServiceAccountAuthenticator::builder(sa_key);
+    if let Some(email) = subject {
+        builder = builder.subject(email);
+    }
+    let auth = builder
         .build()
         .await
         .map_err(|e| AuthError::FlowFailed(e.to_string()))?;

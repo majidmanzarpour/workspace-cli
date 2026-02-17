@@ -36,6 +36,10 @@ struct Cli {
     /// Suppress non-essential output
     #[arg(long, short = 'q', global = true)]
     quiet: bool,
+
+    /// Impersonate user via domain-wide delegation (requires service account)
+    #[arg(long = "as", global = true, value_name = "EMAIL")]
+    impersonate: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -231,6 +235,11 @@ enum Commands {
         #[command(subcommand)]
         command: GroupsCommands,
     },
+    /// Admin directory operations (users)
+    Admin {
+        #[command(subcommand)]
+        command: AdminCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -365,6 +374,12 @@ enum DriveCommands {
         /// Parent folder ID
         #[arg(long)]
         parent: Option<String>,
+        /// Corpora to search: user, domain, drive, allDrives
+        #[arg(long)]
+        corpora: Option<String>,
+        /// Include file permissions in response
+        #[arg(long)]
+        include_permissions: bool,
     },
     /// Upload a file
     Upload {
@@ -945,6 +960,27 @@ enum GroupsCommands {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum AdminCommands {
+    /// List users in the domain
+    UsersList {
+        /// Domain to list users for
+        #[arg(long)]
+        domain: Option<String>,
+        /// Search query (Admin SDK query syntax)
+        #[arg(long)]
+        query: Option<String>,
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+    },
+    /// Get a specific user
+    UsersGet {
+        /// User email or ID
+        user_key: String,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize tracing
@@ -963,7 +999,14 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // Load config and create shared token manager
     let config = Config::load().with_env_overrides();
-    let token_manager = Arc::new(RwLock::new(TokenManager::new(config.clone())));
+    let mut tm = TokenManager::new(config.clone());
+
+    // --as flag: set impersonation subject (CLI overrides config/env)
+    if let Some(ref email) = cli.impersonate {
+        tm.set_subject(Some(email.clone()));
+    }
+
+    let token_manager = Arc::new(RwLock::new(tm));
 
     // Determine output format
     let format = OutputFormat::from_str(&cli.format).unwrap_or(OutputFormat::Json);
@@ -1371,7 +1414,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                DriveCommands::List { query, limit, parent } => {
+                DriveCommands::List { query, limit, parent, corpora, include_permissions } => {
                     // Build query with optional parent filter
                     let final_query = match (query, parent) {
                         (Some(q), Some(p)) => Some(format!("'{}' in parents and ({})", p, q)),
@@ -1386,6 +1429,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         page_token: None,
                         fields: None,
                         order_by: None,
+                        corpora,
+                        include_permissions,
                     };
                     match workspace_cli::commands::drive::list::list_files(&client, params).await {
                         Ok(response) => {
@@ -2672,6 +2717,48 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 GroupsCommands::Members { group_email, limit } => {
                     match workspace_cli::commands::groups::members::list_members_by_email(&client, &group_email, limit).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+            }
+        }
+        Commands::Admin { command } => {
+            {
+                let mut tm = token_manager.write().await;
+                if let Err(e) = tm.ensure_authenticated().await {
+                    eprintln!(r#"{{"status":"error","message":"Authentication failed: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+            }
+
+            let client = ApiClient::admin(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
+            match command {
+                AdminCommands::UsersList { domain, query, limit } => {
+                    let params = workspace_cli::commands::admin::users::ListUsersParams {
+                        domain, query, max_results: limit, page_token: None,
+                    };
+                    match workspace_cli::commands::admin::users::list_users(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                AdminCommands::UsersGet { user_key } => {
+                    match workspace_cli::commands::admin::users::get_user(&client, &user_key).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;

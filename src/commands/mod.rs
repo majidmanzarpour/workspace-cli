@@ -9,6 +9,7 @@ pub mod batch;
 pub mod chat;
 pub mod contacts;
 pub mod groups;
+pub mod admin;
 
 // Re-export commonly used types
 pub use gmail::types as gmail_types;
@@ -21,3 +22,4 @@ pub use tasks::types as tasks_types;
 pub use chat::types as chat_types;
 pub use contacts::types as contacts_types;
 pub use groups::types as groups_types;
+pub use admin::types as admin_types;

@@ -9,6 +9,8 @@ pub struct TokenManager {
     storage: TokenStorage,
     config: Config,
     credentials_path: Option<PathBuf>,
+    /// Email to impersonate via domain-wide delegation (service account only)
+    subject: Option<String>,
 }
 
 impl TokenManager {
@@ -18,12 +20,19 @@ impl TokenManager {
             authenticator: None,
             storage: TokenStorage::new("default"),
             credentials_path: None,
+            subject: config.auth.impersonate_subject.clone(),
             config,
         }
     }
 
+    /// Set the email to impersonate via domain-wide delegation
+    pub fn set_subject(&mut self, subject: Option<String>) {
+        self.subject = subject;
+    }
+
     /// Try to restore authenticator from cached tokens
     /// Call this before making API requests
+    /// When subject is set, automatically uses service account flow for domain-wide delegation
     pub async fn ensure_authenticated(&mut self) -> Result<(), TokenManagerError> {
         // Already have an authenticator
         if self.authenticator.is_some() {
@@ -34,6 +43,11 @@ impl TokenManager {
             }
             // If token fetch fails, clear the authenticator and retry
             self.authenticator = None;
+        }
+
+        // If impersonation is requested, use service account flow
+        if self.subject.is_some() {
+            return self.login_service_account(None).await;
         }
 
         let token_cache = self.token_cache_path();
@@ -148,7 +162,7 @@ impl TokenManager {
             ));
         }
 
-        let auth = oauth::create_service_account_auth(&sa_path)
+        let auth = oauth::create_service_account_auth(&sa_path, self.subject.as_deref())
             .await
             .map_err(TokenManagerError::Auth)?;
 

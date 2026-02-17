@@ -8,6 +8,10 @@ pub struct ListParams {
     pub page_token: Option<String>,
     pub order_by: Option<String>,
     pub fields: Option<String>,
+    /// Corpora to search: user, domain, drive, allDrives
+    pub corpora: Option<String>,
+    /// Include permissions in response fields
+    pub include_permissions: bool,
 }
 
 impl Default for ListParams {
@@ -18,6 +22,8 @@ impl Default for ListParams {
             page_token: None,
             order_by: None,
             fields: Some("files(id,name,mimeType,webViewLink,modifiedTime)".to_string()),
+            corpora: None,
+            include_permissions: false,
         }
     }
 }
@@ -36,7 +42,19 @@ pub async fn list_files(client: &ApiClient, params: ListParams) -> Result<FileLi
     if let Some(ref order) = params.order_by {
         query_params.push(("orderBy", order.clone()));
     }
-    if let Some(ref fields) = params.fields {
+    if let Some(ref corpora) = params.corpora {
+        query_params.push(("corpora", corpora.clone()));
+        // allDrives requires includeItemsFromAllDrives and supportsAllDrives
+        if corpora == "allDrives" || corpora == "drive" {
+            query_params.push(("includeItemsFromAllDrives", "true".to_string()));
+            query_params.push(("supportsAllDrives", "true".to_string()));
+        }
+    }
+    if params.include_permissions {
+        let fields_with_perms = params.fields.clone()
+            .unwrap_or_else(|| "files(id,name,mimeType,webViewLink,modifiedTime,permissions(emailAddress,role,type))".to_string());
+        query_params.push(("fields", fields_with_perms));
+    } else if let Some(ref fields) = params.fields {
         query_params.push(("fields", fields.clone()));
     }
 
