@@ -26,9 +26,21 @@ pub mod endpoints {
 pub struct ApiClient {
     http: Client,
     token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>,
-    rate_limiter: Option<ApiRateLimiter>,
+    rate_limiter: Option<std::sync::Arc<ApiRateLimiter>>,
     retry_config: RetryConfig,
     base_url: String,
+}
+
+impl Clone for ApiClient {
+    fn clone(&self) -> Self {
+        Self {
+            http: self.http.clone(),
+            token_manager: self.token_manager.clone(),
+            rate_limiter: self.rate_limiter.clone(),
+            retry_config: self.retry_config.clone(),
+            base_url: self.base_url.clone(),
+        }
+    }
 }
 
 impl ApiClient {
@@ -59,7 +71,7 @@ impl ApiClient {
 
     /// Set rate limiter
     pub fn with_rate_limiter(mut self, limiter: ApiRateLimiter) -> Self {
-        self.rate_limiter = Some(limiter);
+        self.rate_limiter = Some(std::sync::Arc::new(limiter));
         self
     }
 

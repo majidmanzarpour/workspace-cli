@@ -490,6 +490,17 @@ enum DriveCommands {
         #[arg(long, default_value = "100")]
         limit: u32,
     },
+    /// Recursively crawl a folder tree with concurrent API calls
+    Tree {
+        /// Root folder ID to start crawling from
+        folder_id: String,
+        /// Maximum depth to crawl (default: unlimited)
+        #[arg(long)]
+        max_depth: Option<u32>,
+        /// Number of concurrent API requests (default: 10)
+        #[arg(long, default_value = "10")]
+        concurrency: usize,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -640,6 +651,9 @@ enum SheetsCommands {
     Create {
         /// Spreadsheet title
         title: String,
+        /// Optional sheet tab names (creates multiple tabs)
+        #[arg(long, num_args = 1..)]
+        sheets: Option<Vec<String>>,
     },
     /// Clear a range of cells
     Clear {
@@ -648,6 +662,23 @@ enum SheetsCommands {
         /// Range to clear in A1 notation
         #[arg(long)]
         range: String,
+    },
+    /// Add a new sheet tab to an existing spreadsheet
+    #[command(name = "add-sheet")]
+    AddSheet {
+        /// Spreadsheet ID
+        id: String,
+        /// Name for the new sheet tab
+        title: String,
+    },
+    /// Delete a sheet tab by its numeric sheet ID
+    #[command(name = "delete-sheet")]
+    DeleteSheet {
+        /// Spreadsheet ID
+        id: String,
+        /// Sheet ID (numeric, from sheet properties)
+        #[arg(long)]
+        sheet_id: i64,
     },
 }
 
@@ -1740,6 +1771,23 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                DriveCommands::Tree { folder_id, max_depth, concurrency } => {
+                    match workspace_cli::commands::drive::tree::crawl_tree(&client, &folder_id, max_depth, concurrency).await {
+                        Ok(result) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         }
         Commands::Calendar { command } => {
@@ -2058,8 +2106,13 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                SheetsCommands::Create { title } => {
-                    match workspace_cli::commands::sheets::create::create_spreadsheet(&client, &title).await {
+                SheetsCommands::Create { title, sheets: sheet_names } => {
+                    let result = if let Some(ref names) = sheet_names {
+                        workspace_cli::commands::sheets::create::create_spreadsheet_with_sheets(&client, &title, names).await
+                    } else {
+                        workspace_cli::commands::sheets::create::create_spreadsheet(&client, &title).await
+                    };
+                    match result {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
@@ -2077,6 +2130,40 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 SheetsCommands::Clear { id, range } => {
                     match workspace_cli::commands::sheets::update::clear_values(&client, &id, &range).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::AddSheet { id, title } => {
+                    match workspace_cli::commands::sheets::manage::add_sheet(&client, &id, &title).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::DeleteSheet { id, sheet_id } => {
+                    match workspace_cli::commands::sheets::manage::delete_sheet(&client, &id, sheet_id).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
