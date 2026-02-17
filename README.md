@@ -14,6 +14,9 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 - **Docs**: Read documents as Markdown, append content, create documents, and find/replace text
 - **Sheets**: Read, write, append, create spreadsheets, and clear ranges
 - **Slides**: Get presentations, extract text, and access individual slides
+- **Chat**: List spaces, send messages, DMs, unread detection, mark-read (single + bulk), mute-aware filtering
+- **Contacts**: List, search, get, create, update, delete contacts, directory list/search
+- **Groups**: List group memberships, list group members
 - **Tasks**: Manage task lists and individual tasks
 - **Batch**: Execute up to 100 API requests in a single HTTP call for maximum efficiency
 
@@ -71,6 +74,9 @@ For user-attended sessions with browser-based authentication:
      - Google Sheets API
      - Google Slides API
      - Google Tasks API
+     - Google Chat API
+     - People API (Contacts)
+     - Cloud Identity API (Groups)
 
 3. **Create OAuth2 Credentials**
    - Go to "APIs & Services" > "Credentials"
