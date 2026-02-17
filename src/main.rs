@@ -500,6 +500,9 @@ enum DriveCommands {
         /// Number of concurrent API requests (default: 10)
         #[arg(long, default_value = "10")]
         concurrency: usize,
+        /// Include permissions for each item
+        #[arg(long)]
+        include_permissions: bool,
     },
 }
 
@@ -1771,8 +1774,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                DriveCommands::Tree { folder_id, max_depth, concurrency } => {
-                    match workspace_cli::commands::drive::tree::crawl_tree(&client, &folder_id, max_depth, concurrency).await {
+                DriveCommands::Tree { folder_id, max_depth, concurrency, include_permissions } => {
+                    match workspace_cli::commands::drive::tree::crawl_tree(&client, &folder_id, max_depth, concurrency, include_permissions).await {
                         Ok(result) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;

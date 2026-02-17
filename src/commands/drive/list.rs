@@ -28,7 +28,7 @@ impl Default for ListParams {
 
 /// Default fields for Drive file listing
 const DEFAULT_FILE_FIELDS: &str = "id,name,mimeType,owners(emailAddress),createdTime,modifiedTime,size,parents,shared";
-const PERMISSION_FIELDS: &str = ",permissions(id,type,role,emailAddress,domain)";
+const PERMISSION_FIELDS: &str = ",permissions(id,type,role,emailAddress,domain),driveId";
 
 pub async fn list_files(client: &ApiClient, params: ListParams) -> Result<FileList> {
     let mut query_params: Vec<(&str, String)> = vec![

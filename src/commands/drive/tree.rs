@@ -23,6 +23,21 @@ pub struct TreeNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<String>,
     pub shared: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<TreePermission>,
+    #[serde(rename = "driveId", skip_serializing_if = "Option::is_none")]
+    pub shared_drive_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreePermission {
+    #[serde(rename = "type")]
+    pub perm_type: String,
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,7 +51,21 @@ pub struct TreeResult {
 }
 
 impl TreeNode {
-    fn from_file(file: &File, depth: u32, parent_id: &str) -> Self {
+    fn from_file(file: &File, depth: u32, parent_id: &str, include_permissions: bool) -> Self {
+        let (permissions, shared_drive_id) = if include_permissions {
+            (
+                file.permissions.iter().map(|p| TreePermission {
+                    perm_type: p.permission_type.clone().unwrap_or_default(),
+                    role: p.role.clone().unwrap_or_default(),
+                    email: p.email_address.clone(),
+                    domain: p.domain.clone(),
+                }).collect(),
+                file.drive_id.clone(),
+            )
+        } else {
+            (vec![], None)
+        };
+
         Self {
             id: file.id.clone(),
             name: file.name.clone(),
@@ -48,6 +77,8 @@ impl TreeNode {
             modified_time: file.modified_time.clone(),
             size: file.size.clone(),
             shared: file.shared.unwrap_or(false),
+            permissions,
+            shared_drive_id,
         }
     }
 
@@ -57,7 +88,7 @@ impl TreeNode {
 }
 
 /// List ALL children of a folder (handles pagination)
-async fn list_all_children(client: &ApiClient, parent_id: &str) -> Result<Vec<File>> {
+async fn list_all_children(client: &ApiClient, parent_id: &str, include_permissions: bool) -> Result<Vec<File>> {
     let mut all_files = Vec::new();
     let mut page_token: Option<String> = None;
 
@@ -66,6 +97,7 @@ async fn list_all_children(client: &ApiClient, parent_id: &str) -> Result<Vec<Fi
             query: Some(format!("'{}' in parents and trashed = false", parent_id)),
             max_results: 100,
             page_token: page_token.clone(),
+            include_permissions,
             ..Default::default()
         };
 
@@ -87,6 +119,7 @@ pub async fn crawl_tree(
     root_id: &str,
     max_depth: Option<u32>,
     concurrency: usize,
+    include_permissions: bool,
 ) -> Result<TreeResult> {
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut all_nodes: Vec<TreeNode> = Vec::new();
@@ -112,7 +145,7 @@ pub async fn crawl_tree(
 
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
-                let children = list_all_children(&client, &fid).await;
+                let children = list_all_children(&client, &fid, include_permissions).await;
                 (fid, depth, children)
             }));
         }
@@ -123,7 +156,7 @@ pub async fn crawl_tree(
             match handle.await {
                 Ok((parent_id, depth, Ok(children))) => {
                     for file in &children {
-                        let node = TreeNode::from_file(file, depth, &parent_id);
+                        let node = TreeNode::from_file(file, depth, &parent_id, include_permissions);
                         if node.is_folder() {
                             next_level.push((file.id.clone(), depth + 1));
                         }
