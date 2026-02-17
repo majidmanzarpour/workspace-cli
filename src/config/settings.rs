@@ -23,7 +23,7 @@ pub struct AuthConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputConfig {
-    /// Default output format: json, jsonl, csv
+    /// Default output format: toon, json, jsonl, csv
     #[serde(default = "default_format")]
     pub format: String,
     /// Whether to use compact JSON (no pretty printing)
@@ -42,7 +42,7 @@ pub struct ApiConfig {
 }
 
 fn default_format() -> String {
-    "json".to_string()
+    "toon".to_string()
 }
 
 fn default_timeout() -> u64 {

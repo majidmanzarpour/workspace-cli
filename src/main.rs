@@ -13,16 +13,16 @@ use tracing_subscriber::EnvFilter;
 #[command(long_about = "workspace-cli provides programmatic access to Google Workspace APIs \
     (Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks) with structured JSON output \
     optimized for AI agent consumption.\n\n\
-    All commands output JSON by default. Use --format to change output format.\n\
-    Use --fields to limit response fields for token efficiency.")]
+    All commands output TOON by default for token efficiency. Use --format json for JSON.\n\
+    Use --fields to limit response fields.")]
 #[command(author, version)]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Output format: json, jsonl, csv
-    #[arg(long, short = 'f', global = true, default_value = "json")]
+    /// Output format: toon, json, jsonl, csv
+    #[arg(long, short = 'f', global = true, default_value = "toon")]
     format: String,
 
     /// Fields to include in response (comma-separated)
