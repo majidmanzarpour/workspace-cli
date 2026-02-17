@@ -380,6 +380,9 @@ enum DriveCommands {
         /// Include file permissions in response
         #[arg(long)]
         include_permissions: bool,
+        /// Page token for pagination (from nextPageToken in previous response)
+        #[arg(long)]
+        page_token: Option<String>,
     },
     /// Upload a file
     Upload {
@@ -479,6 +482,13 @@ enum DriveCommands {
         id: String,
         /// Permission ID to remove
         permission_id: String,
+    },
+    /// List all Shared Drives in the domain
+    #[command(name = "drives-list")]
+    DrivesList {
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
     },
 }
 
@@ -1432,7 +1442,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                DriveCommands::List { query, limit, parent, corpora, include_permissions } => {
+                DriveCommands::List { query, limit, parent, corpora, include_permissions, page_token } => {
                     // Build query with optional parent filter
                     let final_query = match (query, parent) {
                         (Some(q), Some(p)) => Some(format!("'{}' in parents and ({})", p, q)),
@@ -1444,7 +1454,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let params = workspace_cli::commands::drive::list::ListParams {
                         query: final_query,
                         max_results: limit,
-                        page_token: None,
+                        page_token,
                         fields: fields.as_ref().map(|f| f.join(",")),
                         order_by: None,
                         corpora,
@@ -1705,6 +1715,23 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(()) => {
                             if !quiet {
                                 println!(r#"{{"status":"success","message":"Permission removed"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::DrivesList { limit } => {
+                    match workspace_cli::commands::drive::list::list_drives(&client, limit, None).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
                             }
                         }
                         Err(e) => {

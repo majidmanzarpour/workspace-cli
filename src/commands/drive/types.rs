@@ -50,6 +50,23 @@ pub struct FileList {
     pub incomplete_search: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDrive {
+    pub id: String,
+    pub name: String,
+    pub kind: Option<String>,
+    pub created_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDriveList {
+    #[serde(default)]
+    pub drives: Vec<SharedDrive>,
+    pub next_page_token: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileMetadata {

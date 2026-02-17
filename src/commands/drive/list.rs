@@ -1,6 +1,6 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{File, FileList};
+use super::types::{File, FileList, SharedDriveList};
 
 pub struct ListParams {
     pub query: Option<String>,
@@ -70,4 +70,16 @@ pub async fn get_file(client: &ApiClient, file_id: &str, fields: Option<&str>) -
     let default_fields = "id,name,mimeType,webViewLink,webContentLink,size,createdTime,modifiedTime,parents";
     let query = [("fields", fields.unwrap_or(default_fields))];
     client.get_with_query(&format!("/files/{}", file_id), &query).await
+}
+
+/// List all Shared Drives in the domain (uses useDomainAdminAccess for org-wide visibility)
+pub async fn list_drives(client: &ApiClient, limit: u32, page_token: Option<&str>) -> Result<SharedDriveList> {
+    let mut query_params: Vec<(&str, String)> = vec![
+        ("pageSize", limit.to_string()),
+        ("useDomainAdminAccess", "true".to_string()),
+    ];
+    if let Some(token) = page_token {
+        query_params.push(("pageToken", token.to_string()));
+    }
+    client.get_with_query("/drives", &query_params).await
 }
