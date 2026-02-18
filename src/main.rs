@@ -683,6 +683,12 @@ enum SheetsCommands {
         #[arg(long)]
         sheet_id: i64,
     },
+    /// List all sheet tabs with their numeric sheet IDs
+    #[command(name = "list-sheets")]
+    ListSheets {
+        /// Spreadsheet ID
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2193,6 +2199,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 formatter.write(&response)?;
                             }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::ListSheets { id } => {
+                    match workspace_cli::commands::sheets::get::get_spreadsheet(&client, &id).await {
+                        Ok(spreadsheet) => {
+                            let tab_ids: std::collections::HashMap<String, i64> = spreadsheet
+                                .sheets
+                                .into_iter()
+                                .map(|s| (s.properties.title, s.properties.sheet_id))
+                                .collect();
+                            formatter.write(&tab_ids)?;
                         }
                         Err(e) => {
                             eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
