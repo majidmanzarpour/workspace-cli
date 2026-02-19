@@ -2707,7 +2707,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 ChatCommands::Unread { limit, r#type, since, include_muted } => {
                     let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
-                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter, &since, include_muted).await {
+                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter, &since, include_muted, None).await {
                         Ok(result) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
@@ -2725,7 +2725,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     if all {
                         // Bulk mode: find all unread spaces, then mark them read
                         let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
-                        match workspace_cli::commands::chat::read_state::get_unread_messages(&client, 1, type_filter, &since, false).await {
+                        match workspace_cli::commands::chat::read_state::get_unread_messages(&client, 1, type_filter, &since, false, None).await {
                             Ok(result) => {
                                 let mut marked = 0usize;
                                 for us in &result.spaces {

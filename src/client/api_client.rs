@@ -186,7 +186,7 @@ impl ApiClient {
     }
 
     /// Get access token
-    async fn get_token(&self) -> Result<String, WorkspaceError> {
+    pub async fn get_token(&self) -> Result<String, WorkspaceError> {
         let tm = self.token_manager.read().await;
         tm.get_access_token()
             .await

@@ -1,4 +1,5 @@
 use crate::client::ApiClient;
+use crate::client::batch::{BatchClient, BatchRequest};
 use crate::error::Result;
 use super::types::{SpaceReadState, ThreadReadState, SpaceNotificationSetting, UnreadResult, UnreadSpace, Space};
 use super::spaces::{list_spaces, ListSpacesParams};
@@ -62,7 +63,7 @@ fn parse_since_to_cutoff(since: &str) -> Option<String> {
     Some(cutoff.to_rfc3339())
 }
 
-pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space_type_filter: Option<&str>, since: &str, include_muted: bool) -> Result<UnreadResult> {
+pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space_type_filter: Option<&str>, since: &str, include_muted: bool, access_token: Option<&str>) -> Result<UnreadResult> {
     // Step 1: List spaces with server-side spaceType filter
     let api_filter = match space_type_filter {
         Some("all") | None => None,
@@ -74,11 +75,10 @@ pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space
         filter: api_filter,
     }).await?;
 
-    // Step 2: Filter out bot DMs, unnamed spaces, inactive spaces, and old spaces
+    // Step 2: Filter out unnamed spaces, inactive spaces, and old spaces
     let since_cutoff = parse_since_to_cutoff(since);
     let spaces: Vec<&Space> = spaces_response.spaces.iter()
         .filter(|s| s.name.is_some())
-        .filter(|s| !s.single_user_bot_dm.unwrap_or(false))
         .filter(|s| s.last_active_time.is_some())
         .filter(|s| {
             match (&since_cutoff, &s.last_active_time) {
@@ -95,27 +95,60 @@ pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space
     let mut total_messages = 0usize;
     let mut muted_count = 0usize;
 
-    for chunk in spaces.chunks(50) {
-        // Fire read state AND notification setting calls in parallel per space
-        let combined_futures: Vec<_> = chunk.iter().map(|space| {
-            let space_name = space.name.as_ref().unwrap().clone();
-            async move {
-                let (rs, ns) = tokio::join!(
-                    get_space_read_state(client, &space_name),
-                    get_notification_setting(client, &space_name)
-                );
-                (space_name, rs, ns)
-            }
-        }).collect();
+    // Get token for batch API (use provided or fetch from client)
+    let token = match access_token {
+        Some(t) => t.to_string(),
+        None => client.get_token().await?,
+    };
+    let batch_client = BatchClient::chat();
 
-        let results = join_all(combined_futures).await;
+    for chunk in spaces.chunks(50) {
+        // Build batch requests for read states + notification settings
+        let mut batch_requests: Vec<BatchRequest> = Vec::with_capacity(chunk.len() * 2);
+        let space_names: Vec<String> = chunk.iter()
+            .map(|s| s.name.as_ref().unwrap().clone())
+            .collect();
+
+        for space_name in &space_names {
+            batch_requests.push(BatchRequest::get(
+                format!("rs_{}", space_name),
+                format!("/v1/users/me/{}/spaceReadState", space_name),
+            ));
+            batch_requests.push(BatchRequest::get(
+                format!("ns_{}", space_name),
+                format!("/v1/users/me/{}/spaceNotificationSetting", space_name),
+            ));
+        }
+
+        // Execute batch (up to 100 requests = 50 spaces × 2)
+        let batch_responses = batch_client.execute(batch_requests, &token).await
+            .map_err(|e| crate::error::WorkspaceError::Config(format!("Batch request failed: {}", e)))?;
+
+        // Parse batch responses into read states and notification settings
+        let mut read_states: std::collections::HashMap<String, SpaceReadState> = std::collections::HashMap::new();
+        let mut notif_settings: std::collections::HashMap<String, SpaceNotificationSetting> = std::collections::HashMap::new();
+
+        for resp in &batch_responses {
+            if !resp.is_success() { continue; }
+            if resp.id.starts_with("rs_") {
+                let space_name = resp.id.trim_start_matches("rs_").to_string();
+                if let Ok(rs) = resp.parse::<SpaceReadState>() {
+                    read_states.insert(space_name, rs);
+                }
+            } else if resp.id.starts_with("ns_") {
+                let space_name = resp.id.trim_start_matches("ns_").to_string();
+                if let Ok(ns) = resp.parse::<SpaceNotificationSetting>() {
+                    notif_settings.insert(space_name, ns);
+                }
+            }
+        }
 
         // Step 4: Filter by mute state, then compare lastActiveTime vs lastReadTime
         let mut needs_messages = Vec::new();
-        for (space_name, rs_result, ns_result) in &results {
+        for space_name in &space_names {
             // Skip muted spaces unless --include-muted
             if !include_muted {
-                if let Ok(ns) = ns_result {
+                if let Some(ns) = notif_settings.get(space_name) {
                     if ns.mute_setting.as_deref() == Some("MUTED") {
                         muted_count += 1;
                         continue;
@@ -123,7 +156,7 @@ pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space
                 }
             }
 
-            if let Ok(rs) = rs_result {
+            if let Some(rs) = read_states.get(space_name) {
                 if let Some(ref last_read) = rs.last_read_time {
                     if last_read.is_empty() { continue; }
 

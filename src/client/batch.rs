@@ -239,8 +239,10 @@ impl BatchClient {
             .find(|l| l.to_lowercase().starts_with("content-id:"))
             .and_then(|l| {
                 let id = l.split(':').nth(1)?.trim();
-                // Remove < > brackets if present
-                Some(id.trim_matches(|c| c == '<' || c == '>' || c == ' ').to_string())
+                // Remove < > brackets and Google's "response-" prefix if present
+                let cleaned = id.trim_matches(|c| c == '<' || c == '>' || c == ' ');
+                let cleaned = cleaned.strip_prefix("response-").unwrap_or(cleaned);
+                Some(cleaned.to_string())
             })
             .unwrap_or_default();
 
