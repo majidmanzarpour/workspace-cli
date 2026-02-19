@@ -8,6 +8,7 @@ pub mod batch_endpoints {
     pub const GMAIL: &str = "https://gmail.googleapis.com/batch/gmail/v1";
     pub const DRIVE: &str = "https://www.googleapis.com/batch/drive/v3";
     pub const CALENDAR: &str = "https://www.googleapis.com/batch/calendar/v3";
+    pub const CHAT: &str = "https://chat.googleapis.com/batch";
 }
 
 /// A single request in a batch
@@ -114,6 +115,11 @@ impl BatchClient {
     /// Create a Calendar batch client
     pub fn calendar() -> Self {
         Self::new(batch_endpoints::CALENDAR)
+    }
+
+    /// Create a Chat batch client
+    pub fn chat() -> Self {
+        Self::new(batch_endpoints::CHAT)
     }
 
     /// Execute a batch of requests

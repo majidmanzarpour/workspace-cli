@@ -201,8 +201,14 @@ enum Commands {
         Examples:\n\
         List spaces:\n  \
         workspace-cli chat spaces-list\n\n\
+        List only DM spaces:\n  \
+        workspace-cli chat spaces-list --type DIRECT_MESSAGE\n\n\
+        Find DM space by email:\n  \
+        workspace-cli chat find-dm --email user@company.com\n\n\
         List messages in a space:\n  \
         workspace-cli chat messages-list --space spaces/abc123\n\n\
+        List today's messages:\n  \
+        workspace-cli chat messages-list --space spaces/abc123 --today\n\n\
         Send a message:\n  \
         workspace-cli chat send --space spaces/abc123 --text 'Hello team'")]
     Chat {
@@ -224,11 +230,13 @@ enum Commands {
         #[command(subcommand)]
         command: ContactsCommands,
     },
-    /// Google Groups operations (Cloud Identity API)
-    #[command(long_about = "Google Groups operations using the Cloud Identity API.\n\n\
+    /// Google Groups operations (Admin Directory API)
+    #[command(long_about = "Google Groups operations using the Admin Directory API.\n\n\
         Examples:\n\
         List groups you belong to:\n  \
         workspace-cli groups list --email user@company.com\n\n\
+        List all groups in a domain:\n  \
+        workspace-cli groups list --domain company.com\n\n\
         List group members:\n  \
         workspace-cli groups members group@company.com")]
     Groups {
@@ -823,12 +831,21 @@ enum ChatCommands {
         /// Maximum results
         #[arg(long, default_value = "100")]
         limit: u32,
+        /// Filter by space type: SPACE, DIRECT_MESSAGE, GROUP_CHAT
+        #[arg(long = "type")]
+        space_type: Option<String>,
     },
     /// Find spaces by display name
     SpacesFind {
         /// Display name to search for
         #[arg(long)]
         name: String,
+    },
+    /// Find a direct message space by participant email (single API call)
+    FindDm {
+        /// Email of the other participant
+        #[arg(long)]
+        email: String,
     },
     /// Create a Chat space
     SpacesCreate {
@@ -856,6 +873,9 @@ enum ChatCommands {
         /// Filter messages created before this time (RFC-3339)
         #[arg(long)]
         before: Option<String>,
+        /// Only show messages from today (shortcut for --after with today's date)
+        #[arg(long)]
+        today: bool,
     },
     /// Get read state for a space (shows lastReadTime)
     ReadState {
@@ -991,11 +1011,14 @@ enum ContactsCommands {
 
 #[derive(Debug, Subcommand)]
 enum GroupsCommands {
-    /// List groups the user belongs to
+    /// List groups (by user email or by domain)
     List {
         /// User email to list groups for
         #[arg(long)]
-        email: String,
+        email: Option<String>,
+        /// Domain to list all groups for (e.g. tisso.de)
+        #[arg(long)]
+        domain: Option<String>,
         /// Maximum results
         #[arg(long, default_value = "100")]
         limit: u32,
@@ -2575,9 +2598,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                ChatCommands::SpacesList { limit } => {
+                ChatCommands::SpacesList { limit, space_type } => {
+                    let filter = space_type.map(|t| format!("spaceType = \"{}\"", t.to_uppercase()));
                     let params = workspace_cli::commands::chat::spaces::ListSpacesParams {
-                        page_size: limit, page_token: None, filter: None,
+                        page_size: limit, page_token: None, filter,
                     };
                     match workspace_cli::commands::chat::spaces::list_spaces(&client, params).await {
                         Ok(response) => {
@@ -2602,6 +2626,18 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
                 }
+                ChatCommands::FindDm { email } => {
+                    match workspace_cli::commands::chat::spaces::find_direct_message(&client, &email).await {
+                        Ok(space) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&space)?;
+                            } else { formatter.write(&space)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
                 ChatCommands::SpacesCreate { name, member } => {
                     match workspace_cli::commands::chat::spaces::create_space(&client, &name, &member).await {
                         Ok(space) => {
@@ -2614,10 +2650,13 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
                 }
-                ChatCommands::MessagesList { space, limit, order, after, before } => {
+                ChatCommands::MessagesList { space, limit, order, after, before, today } => {
                     let order_by = format!("createTime {}", if order.to_lowercase() == "asc" { "ASC" } else { "DESC" });
                     let mut filter_parts: Vec<String> = Vec::new();
-                    if let Some(ref t) = after {
+                    if today {
+                        let today_start = chrono::Local::now().format("%Y-%m-%dT00:00:00Z").to_string();
+                        filter_parts.push(format!("createTime > \"{}\"", today_start));
+                    } else if let Some(ref t) = after {
                         filter_parts.push(format!("createTime > \"{}\"", t));
                     }
                     if let Some(ref t) = before {
@@ -2874,10 +2913,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                GroupsCommands::List { email, limit } => {
+                GroupsCommands::List { email, domain, limit } => {
+                    if email.is_none() && domain.is_none() {
+                        eprintln!(r#"{{"status":"error","message":"Either --email or --domain is required"}}"#);
+                        std::process::exit(1);
+                    }
                     let admin_client = ApiClient::admin(token_manager.clone());
                     let params = workspace_cli::commands::groups::list::ListGroupsParams {
-                        email, page_size: limit, page_token: None,
+                        email, domain, page_size: limit, page_token: None,
                     };
                     match workspace_cli::commands::groups::list::list_groups(&admin_client, params).await {
                         Ok(response) => {

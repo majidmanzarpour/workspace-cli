@@ -65,3 +65,9 @@ pub async fn find_space_by_name(client: &ApiClient, name: &str) -> Result<Vec<Sp
         .collect();
     Ok(matches)
 }
+
+/// Find a direct message space by participant email (single API call)
+pub async fn find_direct_message(client: &ApiClient, email: &str) -> Result<Space> {
+    let query = vec![("name", format!("users/{}", email))];
+    client.get_with_query("/spaces:findDirectMessage", &query).await
+}

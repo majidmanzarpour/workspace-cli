@@ -65,6 +65,32 @@ impl Formatter {
         self.format
     }
 
+    /// Remove duplicate string values within the same object level (TOON dedup).
+    /// If multiple fields have the same string value, only the first is kept.
+    /// Applied recursively to nested objects and arrays.
+    fn dedup_string_values(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut seen_strings = std::collections::HashSet::new();
+                let mut deduped = serde_json::Map::new();
+                for (key, val) in map {
+                    let val = Self::dedup_string_values(val);
+                    if let serde_json::Value::String(ref s) = val {
+                        if !s.is_empty() && !seen_strings.insert(s.clone()) {
+                            continue; // skip duplicate string value
+                        }
+                    }
+                    deduped.insert(key, val);
+                }
+                serde_json::Value::Object(deduped)
+            }
+            serde_json::Value::Array(arr) => {
+                serde_json::Value::Array(arr.into_iter().map(Self::dedup_string_values).collect())
+            }
+            other => other,
+        }
+    }
+
     /// Filter a JSON value to only include specified fields
     fn filter_fields(&self, value: serde_json::Value) -> serde_json::Value {
         let fields = match &self.fields {
@@ -188,7 +214,8 @@ impl Formatter {
 
         match self.format {
             OutputFormat::Toon => {
-                let toon = toon_format::encode(&filtered, &toon_format::EncodeOptions::default())
+                let deduped = Self::dedup_string_values(filtered);
+                let toon = toon_format::encode(&deduped, &toon_format::EncodeOptions::default())
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
                 writeln!(self.writer, "{}", toon)
             }
@@ -226,7 +253,8 @@ impl Formatter {
                 let value = serde_json::to_value(items)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 let filtered = self.filter_fields(value);
-                let toon = toon_format::encode(&filtered, &toon_format::EncodeOptions::default())
+                let deduped = Self::dedup_string_values(filtered);
+                let toon = toon_format::encode(&deduped, &toon_format::EncodeOptions::default())
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
                 writeln!(self.writer, "{}", toon)
             }
@@ -277,7 +305,8 @@ impl Formatter {
 
         match self.format {
             OutputFormat::Toon => {
-                let toon = toon_format::encode(&filtered, &toon_format::EncodeOptions::default())
+                let deduped = Self::dedup_string_values(filtered);
+                let toon = toon_format::encode(&deduped, &toon_format::EncodeOptions::default())
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
                 writeln!(self.writer, "{}", toon)
             }
