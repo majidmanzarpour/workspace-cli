@@ -2671,7 +2671,41 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         filter,
                     };
                     match workspace_cli::commands::chat::messages::list_messages(&client, params).await {
-                        Ok(response) => {
+                        Ok(mut response) => {
+                            // Resolve sender displayNames via Admin Directory API
+                            let user_ids: std::collections::HashSet<String> = response.messages.iter()
+                                .filter_map(|m| m.sender.as_ref())
+                                .filter(|s| s.display_name.is_none())
+                                .filter_map(|s| s.name.as_ref())
+                                .filter(|n| n.starts_with("users/"))
+                                .map(|n| n.strip_prefix("users/").unwrap().to_string())
+                                .collect();
+                            if !user_ids.is_empty() {
+                                let admin_client = ApiClient::admin(token_manager.clone());
+                                let mut name_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                                for uid in &user_ids {
+                                    if let Ok(user) = workspace_cli::commands::admin::users::get_user(&admin_client, uid).await {
+                                        if let Some(uname) = user.name {
+                                            if let Some(full) = uname.full_name {
+                                                name_map.insert(uid.clone(), full);
+                                            }
+                                        }
+                                    }
+                                }
+                                for msg in &mut response.messages {
+                                    if let Some(ref mut sender) = msg.sender {
+                                        if sender.display_name.is_none() {
+                                            if let Some(ref name) = sender.name {
+                                                if let Some(uid) = name.strip_prefix("users/") {
+                                                    if let Some(resolved) = name_map.get(uid) {
+                                                        sender.display_name = Some(resolved.clone());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
                                 let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
