@@ -13,16 +13,16 @@ use tracing_subscriber::EnvFilter;
 #[command(long_about = "workspace-cli provides programmatic access to Google Workspace APIs \
     (Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks) with structured JSON output \
     optimized for AI agent consumption.\n\n\
-    All commands output JSON by default. Use --format to change output format.\n\
-    Use --fields to limit response fields for token efficiency.")]
+    All commands output TOON by default for token efficiency. Use --format json for JSON.\n\
+    Use --fields to limit response fields.")]
 #[command(author, version)]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Output format: json, jsonl, csv
-    #[arg(long, short = 'f', global = true, default_value = "json")]
+    /// Output format: toon, json, jsonl, csv
+    #[arg(long, short = 'f', global = true, default_value = "toon")]
     format: String,
 
     /// Fields to include in response (comma-separated)
@@ -36,6 +36,10 @@ struct Cli {
     /// Suppress non-essential output
     #[arg(long, short = 'q', global = true)]
     quiet: bool,
+
+    /// Impersonate user via domain-wide delegation (requires service account)
+    #[arg(long = "as", global = true, value_name = "EMAIL")]
+    impersonate: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -192,6 +196,58 @@ enum Commands {
         #[command(subcommand)]
         command: BatchCommands,
     },
+    /// Google Chat operations
+    #[command(long_about = "Google Chat operations for messaging and space management.\n\n\
+        Examples:\n\
+        List spaces:\n  \
+        workspace-cli chat spaces-list\n\n\
+        List only DM spaces:\n  \
+        workspace-cli chat spaces-list --type DIRECT_MESSAGE\n\n\
+        Find DM space by email:\n  \
+        workspace-cli chat find-dm --email user@company.com\n\n\
+        List messages in a space:\n  \
+        workspace-cli chat messages-list --space spaces/abc123\n\n\
+        List today's messages:\n  \
+        workspace-cli chat messages-list --space spaces/abc123 --today\n\n\
+        Send a message:\n  \
+        workspace-cli chat send --space spaces/abc123 --text 'Hello team'")]
+    Chat {
+        #[command(subcommand)]
+        command: ChatCommands,
+    },
+    /// Google Contacts operations (People API)
+    #[command(long_about = "Google Contacts operations using the People API.\n\n\
+        Examples:\n\
+        List contacts:\n  \
+        workspace-cli contacts list --limit 20\n\n\
+        Search contacts:\n  \
+        workspace-cli contacts search --query 'John'\n\n\
+        Get a contact:\n  \
+        workspace-cli contacts get people/c123456\n\n\
+        List workspace directory:\n  \
+        workspace-cli contacts directory-list")]
+    Contacts {
+        #[command(subcommand)]
+        command: ContactsCommands,
+    },
+    /// Google Groups operations (Admin Directory API)
+    #[command(long_about = "Google Groups operations using the Admin Directory API.\n\n\
+        Examples:\n\
+        List groups you belong to:\n  \
+        workspace-cli groups list --email user@company.com\n\n\
+        List all groups in a domain:\n  \
+        workspace-cli groups list --domain company.com\n\n\
+        List group members:\n  \
+        workspace-cli groups members group@company.com")]
+    Groups {
+        #[command(subcommand)]
+        command: GroupsCommands,
+    },
+    /// Admin directory operations (users)
+    Admin {
+        #[command(subcommand)]
+        command: AdminCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -326,6 +382,15 @@ enum DriveCommands {
         /// Parent folder ID
         #[arg(long)]
         parent: Option<String>,
+        /// Corpora to search: user, domain, drive, allDrives
+        #[arg(long)]
+        corpora: Option<String>,
+        /// Include file permissions in response
+        #[arg(long)]
+        include_permissions: bool,
+        /// Page token for pagination (from nextPageToken in previous response)
+        #[arg(long)]
+        page_token: Option<String>,
     },
     /// Upload a file
     Upload {
@@ -425,6 +490,27 @@ enum DriveCommands {
         id: String,
         /// Permission ID to remove
         permission_id: String,
+    },
+    /// List all Shared Drives in the domain
+    #[command(name = "drives-list")]
+    DrivesList {
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+    },
+    /// Recursively crawl a folder tree with concurrent API calls
+    Tree {
+        /// Root folder ID to start crawling from
+        folder_id: String,
+        /// Maximum depth to crawl (default: unlimited)
+        #[arg(long)]
+        max_depth: Option<u32>,
+        /// Number of concurrent API requests (default: 10)
+        #[arg(long, default_value = "10")]
+        concurrency: usize,
+        /// Include permissions for each item
+        #[arg(long)]
+        include_permissions: bool,
     },
 }
 
@@ -576,6 +662,9 @@ enum SheetsCommands {
     Create {
         /// Spreadsheet title
         title: String,
+        /// Optional sheet tab names (creates multiple tabs)
+        #[arg(long, num_args = 1..)]
+        sheets: Option<Vec<String>>,
     },
     /// Clear a range of cells
     Clear {
@@ -584,6 +673,29 @@ enum SheetsCommands {
         /// Range to clear in A1 notation
         #[arg(long)]
         range: String,
+    },
+    /// Add a new sheet tab to an existing spreadsheet
+    #[command(name = "add-sheet")]
+    AddSheet {
+        /// Spreadsheet ID
+        id: String,
+        /// Name for the new sheet tab
+        title: String,
+    },
+    /// Delete a sheet tab by its numeric sheet ID
+    #[command(name = "delete-sheet")]
+    DeleteSheet {
+        /// Spreadsheet ID
+        id: String,
+        /// Sheet ID (numeric, from sheet properties)
+        #[arg(long)]
+        sheet_id: i64,
+    },
+    /// List all sheet tabs with their numeric sheet IDs
+    #[command(name = "list-sheets")]
+    ListSheets {
+        /// Spreadsheet ID
+        id: String,
     },
 }
 
@@ -712,6 +824,254 @@ enum BatchCommands {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum ChatCommands {
+    /// List Chat spaces
+    SpacesList {
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+        /// Filter by space type: SPACE, DIRECT_MESSAGE, GROUP_CHAT
+        #[arg(long = "type")]
+        space_type: Option<String>,
+    },
+    /// Find spaces by display name
+    SpacesFind {
+        /// Display name to search for
+        #[arg(long)]
+        name: String,
+    },
+    /// Find a direct message space by participant email (single API call)
+    FindDm {
+        /// Email of the other participant
+        #[arg(long)]
+        email: String,
+    },
+    /// Create a Chat space
+    SpacesCreate {
+        /// Space display name
+        #[arg(long)]
+        name: String,
+        /// Member emails to add
+        #[arg(long)]
+        member: Vec<String>,
+    },
+    /// List messages in a space
+    MessagesList {
+        /// Space name (e.g. spaces/abc123)
+        #[arg(long)]
+        space: String,
+        /// Maximum results
+        #[arg(long, default_value = "25")]
+        limit: u32,
+        /// Sort order: desc (newest first) or asc (oldest first)
+        #[arg(long, default_value = "desc")]
+        order: String,
+        /// Filter messages created after this time (RFC-3339)
+        #[arg(long)]
+        after: Option<String>,
+        /// Filter messages created before this time (RFC-3339)
+        #[arg(long)]
+        before: Option<String>,
+        /// Only show messages from today (shortcut for --after with today's date)
+        #[arg(long)]
+        today: bool,
+    },
+    /// Get read state for a space (shows lastReadTime)
+    ReadState {
+        /// Space name (e.g. spaces/abc123)
+        #[arg(long)]
+        space: String,
+    },
+    /// Get read state for a thread
+    ThreadReadState {
+        /// Space name
+        #[arg(long)]
+        space: String,
+        /// Thread name
+        #[arg(long)]
+        thread: String,
+    },
+    /// Show unread messages across all spaces
+    Unread {
+        /// Maximum messages per space
+        #[arg(long, default_value = "10")]
+        limit: u32,
+        /// Filter by space type: SPACE, DIRECT_MESSAGE, GROUP_CHAT, or all
+        #[arg(long, default_value = "SPACE")]
+        r#type: String,
+        /// Only check spaces active within this period (e.g. 1d, 7d, 30d, all). Default: 7d
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Include muted spaces (skipped by default)
+        #[arg(long, default_value = "false")]
+        include_muted: bool,
+    },
+    /// Mark a space as read (set lastReadTime to now or specific timestamp)
+    MarkRead {
+        /// Space name (e.g. spaces/abc123). Omit for --all mode
+        #[arg(long)]
+        space: Option<String>,
+        /// Mark all currently unread spaces as read
+        #[arg(long, default_value = "false")]
+        all: bool,
+        /// Specific timestamp to mark as read (RFC-3339). Default: now
+        #[arg(long)]
+        time: Option<String>,
+        /// Space type filter for --all mode
+        #[arg(long, default_value = "SPACE")]
+        r#type: String,
+        /// Since filter for --all mode
+        #[arg(long, default_value = "7d")]
+        since: String,
+    },
+    /// Send a message to a space
+    Send {
+        /// Space name (e.g. spaces/abc123)
+        #[arg(long)]
+        space: String,
+        /// Message text
+        #[arg(long)]
+        text: String,
+        /// Thread name for threaded reply
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// Get a specific message
+    Get {
+        /// Message resource name
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ContactsCommands {
+    /// List contacts
+    List {
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+    },
+    /// Search contacts by query
+    Search {
+        /// Search query (name, email, phone)
+        #[arg(long)]
+        query: String,
+        /// Maximum results
+        #[arg(long, default_value = "50")]
+        limit: u32,
+    },
+    /// Get a specific contact
+    Get {
+        /// Resource name (e.g. people/c123456)
+        name: String,
+    },
+    /// Create a new contact
+    Create {
+        /// Given (first) name
+        #[arg(long)]
+        given: String,
+        /// Family (last) name
+        #[arg(long)]
+        family: Option<String>,
+        /// Email address
+        #[arg(long)]
+        email: Option<String>,
+        /// Phone number
+        #[arg(long)]
+        phone: Option<String>,
+        /// Organization name
+        #[arg(long)]
+        org: Option<String>,
+        /// Job title
+        #[arg(long)]
+        title: Option<String>,
+    },
+    /// Delete a contact
+    Delete {
+        /// Resource name (e.g. people/c123456)
+        name: String,
+    },
+    /// List workspace directory people
+    DirectoryList {
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+    },
+    /// Search workspace directory
+    DirectorySearch {
+        /// Search query
+        #[arg(long)]
+        query: String,
+        /// Maximum results
+        #[arg(long, default_value = "50")]
+        limit: u32,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GroupsCommands {
+    /// List groups (by user email or by domain)
+    List {
+        /// User email to list groups for
+        #[arg(long)]
+        email: Option<String>,
+        /// Domain to list all groups for (e.g. tisso.de)
+        #[arg(long)]
+        domain: Option<String>,
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+    },
+    /// List members of a group
+    Members {
+        /// Group email address
+        group_email: String,
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AdminCommands {
+    /// List users in the domain
+    UsersList {
+        /// Domain to list users for
+        #[arg(long)]
+        domain: Option<String>,
+        /// Search query (Admin SDK query syntax)
+        #[arg(long)]
+        query: Option<String>,
+        /// Maximum results
+        #[arg(long, default_value = "100")]
+        limit: u32,
+    },
+    /// Get a specific user
+    UsersGet {
+        /// User email or ID
+        user_key: String,
+    },
+    /// Query Drive audit events from Admin Reports API
+    ReportsDriveActivity {
+        /// Event name to filter (view, edit, download, print, preview)
+        #[arg(long, default_value = "view")]
+        event_name: String,
+        /// Start time (ISO 8601, e.g. 2025-08-01T00:00:00Z)
+        #[arg(long)]
+        start_time: Option<String>,
+        /// End time (ISO 8601, e.g. 2026-02-17T00:00:00Z)
+        #[arg(long)]
+        end_time: Option<String>,
+        /// Filter expression (e.g. doc_id==FILE_ID)
+        #[arg(long)]
+        filters: Option<String>,
+        /// Max results per page (max 1000)
+        #[arg(long, default_value = "1000")]
+        max_results: u32,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize tracing
@@ -730,7 +1090,32 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // Load config and create shared token manager
     let config = Config::load().with_env_overrides();
-    let token_manager = Arc::new(RwLock::new(TokenManager::new(config.clone())));
+    let mut tm = TokenManager::new(config.clone());
+
+    // --as flag: set impersonation subject (CLI overrides config/env)
+    if let Some(ref email) = cli.impersonate {
+        tm.set_subject(Some(email.clone()));
+    }
+
+    // Set service for per-service scope selection (used with --as)
+    let service_name = match &cli.command {
+        Commands::Gmail { .. } => "gmail",
+        Commands::Drive { .. } => "drive",
+        Commands::Calendar { .. } => "calendar",
+        Commands::Docs { .. } => "docs",
+        Commands::Sheets { .. } => "sheets",
+        Commands::Slides { .. } => "slides",
+        Commands::Tasks { .. } => "tasks",
+        Commands::Chat { .. } => "chat",
+        Commands::Contacts { .. } => "contacts",
+        Commands::Groups { .. } => "groups",
+        Commands::Admin { .. } => "admin",
+        Commands::Batch { .. } => "drive",
+        Commands::Auth { .. } => "drive",
+    };
+    tm.set_service(service_name);
+
+    let token_manager = Arc::new(RwLock::new(tm));
 
     // Determine output format
     let format = OutputFormat::from_str(&cli.format).unwrap_or(OutputFormat::Json);
@@ -1138,7 +1523,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                DriveCommands::List { query, limit, parent } => {
+                DriveCommands::List { query, limit, parent, corpora, include_permissions, page_token } => {
                     // Build query with optional parent filter
                     let final_query = match (query, parent) {
                         (Some(q), Some(p)) => Some(format!("'{}' in parents and ({})", p, q)),
@@ -1150,9 +1535,11 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let params = workspace_cli::commands::drive::list::ListParams {
                         query: final_query,
                         max_results: limit,
-                        page_token: None,
-                        fields: None,
+                        page_token,
+                        fields: fields.as_ref().map(|f| f.join(",")),
                         order_by: None,
+                        corpora,
+                        include_permissions,
                     };
                     match workspace_cli::commands::drive::list::list_files(&client, params).await {
                         Ok(response) => {
@@ -1409,6 +1796,40 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(()) => {
                             if !quiet {
                                 println!(r#"{{"status":"success","message":"Permission removed"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::DrivesList { limit } => {
+                    match workspace_cli::commands::drive::list::list_drives(&client, limit, None).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Tree { folder_id, max_depth, concurrency, include_permissions } => {
+                    match workspace_cli::commands::drive::tree::crawl_tree(&client, &folder_id, max_depth, concurrency, include_permissions).await {
+                        Ok(result) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
                             }
                         }
                         Err(e) => {
@@ -1735,8 +2156,13 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                SheetsCommands::Create { title } => {
-                    match workspace_cli::commands::sheets::create::create_spreadsheet(&client, &title).await {
+                SheetsCommands::Create { title, sheets: sheet_names } => {
+                    let result = if let Some(ref names) = sheet_names {
+                        workspace_cli::commands::sheets::create::create_spreadsheet_with_sheets(&client, &title, names).await
+                    } else {
+                        workspace_cli::commands::sheets::create::create_spreadsheet(&client, &title).await
+                    };
+                    match result {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
@@ -1762,6 +2188,56 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 formatter.write(&response)?;
                             }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::AddSheet { id, title } => {
+                    match workspace_cli::commands::sheets::manage::add_sheet(&client, &id, &title).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::DeleteSheet { id, sheet_id } => {
+                    match workspace_cli::commands::sheets::manage::delete_sheet(&client, &id, sheet_id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::ListSheets { id } => {
+                    match workspace_cli::commands::sheets::get::get_spreadsheet(&client, &id).await {
+                        Ok(spreadsheet) => {
+                            let tab_ids: std::collections::HashMap<String, i64> = spreadsheet
+                                .sheets
+                                .into_iter()
+                                .map(|s| (s.properties.title, s.properties.sheet_id))
+                                .collect();
+                            formatter.write(&tab_ids)?;
                         }
                         Err(e) => {
                             eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
@@ -2105,6 +2581,462 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => {
                     eprintln!(r#"{{"status":"error","message":"Batch request failed: {}"}}"#, e);
                     std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Chat { command } => {
+            {
+                let mut tm = token_manager.write().await;
+                if let Err(e) = tm.ensure_authenticated().await {
+                    eprintln!(r#"{{"status":"error","message":"Authentication failed: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+            }
+
+            let client = ApiClient::chat(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
+            match command {
+                ChatCommands::SpacesList { limit, space_type } => {
+                    let filter = space_type.map(|t| format!("spaceType = \"{}\"", t.to_uppercase()));
+                    let params = workspace_cli::commands::chat::spaces::ListSpacesParams {
+                        page_size: limit, page_token: None, filter,
+                    };
+                    match workspace_cli::commands::chat::spaces::list_spaces(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::SpacesFind { name } => {
+                    match workspace_cli::commands::chat::spaces::find_space_by_name(&client, &name).await {
+                        Ok(spaces) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&spaces)?;
+                            } else { formatter.write(&spaces)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::FindDm { email } => {
+                    match workspace_cli::commands::chat::spaces::find_direct_message(&client, &email).await {
+                        Ok(space) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&space)?;
+                            } else { formatter.write(&space)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::SpacesCreate { name, member } => {
+                    match workspace_cli::commands::chat::spaces::create_space(&client, &name, &member).await {
+                        Ok(space) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&space)?;
+                            } else { formatter.write(&space)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::MessagesList { space, limit, order, after, before, today } => {
+                    let order_by = format!("createTime {}", if order.to_lowercase() == "asc" { "ASC" } else { "DESC" });
+                    let mut filter_parts: Vec<String> = Vec::new();
+                    if today {
+                        let today_start = chrono::Local::now().format("%Y-%m-%dT00:00:00Z").to_string();
+                        filter_parts.push(format!("createTime > \"{}\"", today_start));
+                    } else if let Some(ref t) = after {
+                        filter_parts.push(format!("createTime > \"{}\"", t));
+                    }
+                    if let Some(ref t) = before {
+                        filter_parts.push(format!("createTime < \"{}\"", t));
+                    }
+                    let filter = if filter_parts.is_empty() { None } else { Some(filter_parts.join(" AND ")) };
+                    let params = workspace_cli::commands::chat::messages::ListMessagesParams {
+                        space_name: space,
+                        page_size: limit,
+                        page_token: None,
+                        order_by: Some(order_by),
+                        filter,
+                    };
+                    match workspace_cli::commands::chat::messages::list_messages(&client, params).await {
+                        Ok(mut response) => {
+                            // Resolve sender displayNames via Admin Directory API
+                            let user_ids: std::collections::HashSet<String> = response.messages.iter()
+                                .filter_map(|m| m.sender.as_ref())
+                                .filter(|s| s.display_name.is_none())
+                                .filter_map(|s| s.name.as_ref())
+                                .filter(|n| n.starts_with("users/"))
+                                .map(|n| n.strip_prefix("users/").unwrap().to_string())
+                                .collect();
+                            if !user_ids.is_empty() {
+                                let admin_client = ApiClient::admin(token_manager.clone());
+                                let mut name_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                                for uid in &user_ids {
+                                    if let Ok(user) = workspace_cli::commands::admin::users::get_user(&admin_client, uid).await {
+                                        if let Some(uname) = user.name {
+                                            if let Some(full) = uname.full_name {
+                                                name_map.insert(uid.clone(), full);
+                                            }
+                                        }
+                                    }
+                                }
+                                for msg in &mut response.messages {
+                                    if let Some(ref mut sender) = msg.sender {
+                                        if sender.display_name.is_none() {
+                                            if let Some(ref name) = sender.name {
+                                                if let Some(uid) = name.strip_prefix("users/") {
+                                                    if let Some(resolved) = name_map.get(uid) {
+                                                        sender.display_name = Some(resolved.clone());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::ReadState { space } => {
+                    match workspace_cli::commands::chat::read_state::get_space_read_state(&client, &space).await {
+                        Ok(state) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&state)?;
+                            } else { formatter.write(&state)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::ThreadReadState { space, thread } => {
+                    match workspace_cli::commands::chat::read_state::get_thread_read_state(&client, &space, &thread).await {
+                        Ok(state) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&state)?;
+                            } else { formatter.write(&state)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::Unread { limit, r#type, since, include_muted } => {
+                    let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
+                    match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter, &since, include_muted, None).await {
+                        Ok(result) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&result)?;
+                            } else { formatter.write(&result)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::MarkRead { space, all, time, r#type, since } => {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let read_time = time.as_deref().unwrap_or(&now);
+
+                    if all {
+                        // Bulk mode: find all unread spaces, then mark them read
+                        let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
+                        match workspace_cli::commands::chat::read_state::get_unread_messages(&client, 1, type_filter, &since, false, None).await {
+                            Ok(result) => {
+                                let mut marked = 0usize;
+                                for us in &result.spaces {
+                                    if let Some(ref sn) = us.space_name {
+                                        // Use the latest message time or now
+                                        let mark_time = us.messages.first()
+                                            .and_then(|m| m.create_time.as_deref())
+                                            .unwrap_or(read_time);
+                                        if let Ok(_) = workspace_cli::commands::chat::read_state::update_space_read_state(&client, sn, mark_time).await {
+                                            marked += 1;
+                                            eprintln!("Marked read: {} ({})", us.display_name.as_deref().unwrap_or(sn), mark_time);
+                                        }
+                                    }
+                                }
+                                let summary = serde_json::json!({ "status": "ok", "spacesMarkedRead": marked });
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&summary)?;
+                                } else { formatter.write(&summary)?; }
+                            }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        }
+                    } else if let Some(ref space_name) = space {
+                        match workspace_cli::commands::chat::read_state::update_space_read_state(&client, space_name, read_time).await {
+                            Ok(state) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&state)?;
+                                } else { formatter.write(&state)?; }
+                            }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        }
+                    } else {
+                        eprintln!(r#"{{"status":"error","message":"Provide --space or --all"}}"#);
+                        std::process::exit(1);
+                    }
+                }
+                ChatCommands::Send { space, text, thread } => {
+                    match workspace_cli::commands::chat::messages::send_message(&client, &space, &text, thread.as_deref()).await {
+                        Ok(msg) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&msg)?;
+                            } else { formatter.write(&msg)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ChatCommands::Get { name } => {
+                    match workspace_cli::commands::chat::messages::get_message(&client, &name).await {
+                        Ok(msg) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&msg)?;
+                            } else { formatter.write(&msg)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+            }
+        }
+
+        Commands::Contacts { command } => {
+            {
+                let mut tm = token_manager.write().await;
+                if let Err(e) = tm.ensure_authenticated().await {
+                    eprintln!(r#"{{"status":"error","message":"Authentication failed: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+            }
+
+            let client = ApiClient::contacts(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
+            match command {
+                ContactsCommands::List { limit } => {
+                    let params = workspace_cli::commands::contacts::list::ListContactsParams {
+                        page_size: limit, page_token: None,
+                    };
+                    match workspace_cli::commands::contacts::list::list_contacts(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ContactsCommands::Search { query, limit } => {
+                    match workspace_cli::commands::contacts::search::search_contacts(&client, &query, limit).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ContactsCommands::Get { name } => {
+                    match workspace_cli::commands::contacts::list::get_contact(&client, &name).await {
+                        Ok(person) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&person)?;
+                            } else { formatter.write(&person)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ContactsCommands::Create { given, family, email, phone, org, title } => {
+                    let params = workspace_cli::commands::contacts::create::CreateContactParams {
+                        given_name: given, family_name: family, email, phone,
+                        org_name: org, org_title: title,
+                    };
+                    match workspace_cli::commands::contacts::create::create_contact(&client, params).await {
+                        Ok(person) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&person)?;
+                            } else { formatter.write(&person)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ContactsCommands::Delete { name } => {
+                    match workspace_cli::commands::contacts::create::delete_contact(&client, &name).await {
+                        Ok(()) => {
+                            if !quiet {
+                                eprintln!(r#"{{"status":"success","message":"Contact deleted"}}"#);
+                            }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ContactsCommands::DirectoryList { limit } => {
+                    let params = workspace_cli::commands::contacts::search::DirectoryListParams {
+                        page_size: limit, page_token: None,
+                    };
+                    match workspace_cli::commands::contacts::search::list_directory(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                ContactsCommands::DirectorySearch { query, limit } => {
+                    match workspace_cli::commands::contacts::search::search_directory(&client, &query, limit, None).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+            }
+        }
+
+        Commands::Groups { command } => {
+            {
+                let mut tm = token_manager.write().await;
+                if let Err(e) = tm.ensure_authenticated().await {
+                    eprintln!(r#"{{"status":"error","message":"Authentication failed: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+            }
+
+            let client = ApiClient::groups(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
+            match command {
+                GroupsCommands::List { email, domain, limit } => {
+                    if email.is_none() && domain.is_none() {
+                        eprintln!(r#"{{"status":"error","message":"Either --email or --domain is required"}}"#);
+                        std::process::exit(1);
+                    }
+                    let admin_client = ApiClient::admin(token_manager.clone());
+                    let params = workspace_cli::commands::groups::list::ListGroupsParams {
+                        email, domain, page_size: limit, page_token: None,
+                    };
+                    match workspace_cli::commands::groups::list::list_groups(&admin_client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                GroupsCommands::Members { group_email, limit } => {
+                    match workspace_cli::commands::groups::members::list_members_by_email(&client, &group_email, limit).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+            }
+        }
+        Commands::Admin { command } => {
+            {
+                let mut tm = token_manager.write().await;
+                if let Err(e) = tm.ensure_authenticated().await {
+                    eprintln!(r#"{{"status":"error","message":"Authentication failed: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+            }
+
+            let client = ApiClient::admin(token_manager.clone());
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
+            match command {
+                AdminCommands::UsersList { domain, query, limit } => {
+                    let params = workspace_cli::commands::admin::users::ListUsersParams {
+                        domain, query, max_results: limit, page_token: None,
+                    };
+                    match workspace_cli::commands::admin::users::list_users(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                AdminCommands::UsersGet { user_key } => {
+                    match workspace_cli::commands::admin::users::get_user(&client, &user_key).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&response)?;
+                            } else { formatter.write(&response)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
+                }
+                AdminCommands::ReportsDriveActivity { event_name, start_time, end_time, filters, max_results } => {
+                    let reports_client = ApiClient::admin_reports(token_manager.clone());
+                    let params = workspace_cli::commands::admin::reports::DriveActivityParams {
+                        event_name, start_time, end_time, filters, max_results,
+                    };
+                    match workspace_cli::commands::admin::reports::list_drive_activity(&reports_client, params).await {
+                        Ok(events) => {
+                            eprintln!("Total events: {}", events.len());
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                ff.write(&events)?;
+                            } else { formatter.write(&events)?; }
+                        }
+                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                    }
                 }
             }
         }

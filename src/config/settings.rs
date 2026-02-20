@@ -19,11 +19,14 @@ pub struct AuthConfig {
     /// Path to service account key JSON (for headless mode)
     #[serde(default)]
     pub service_account_path: Option<PathBuf>,
+    /// Email to impersonate via domain-wide delegation (service account only)
+    #[serde(default)]
+    pub impersonate_subject: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputConfig {
-    /// Default output format: json, jsonl, csv
+    /// Default output format: toon, json, jsonl, csv
     #[serde(default = "default_format")]
     pub format: String,
     /// Whether to use compact JSON (no pretty printing)
@@ -42,7 +45,7 @@ pub struct ApiConfig {
 }
 
 fn default_format() -> String {
-    "json".to_string()
+    "toon".to_string()
 }
 
 fn default_timeout() -> u64 {
@@ -68,6 +71,7 @@ impl Default for AuthConfig {
         Self {
             credentials_path: None,
             service_account_path: None,
+            impersonate_subject: None,
         }
     }
 }
@@ -128,6 +132,9 @@ impl Config {
         }
         if let Ok(path) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS") {
             self.auth.service_account_path = Some(PathBuf::from(path));
+        }
+        if let Ok(email) = std::env::var("WORKSPACE_IMPERSONATE") {
+            self.auth.impersonate_subject = Some(email);
         }
         if let Ok(format) = std::env::var("WORKSPACE_OUTPUT_FORMAT") {
             self.output.format = format;

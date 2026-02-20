@@ -4,7 +4,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 ## Overview
 
-`workspace-cli` is a Rust-based command-line tool designed to provide programmatic access to Google Workspace APIs with structured JSON output optimized for AI agent consumption. Built for speed, efficiency, and deterministic execution.
+`workspace-cli` is a Rust-based command-line tool designed to provide programmatic access to Google Workspace APIs with structured output (TOON/JSON/JSONL/CSV) optimized for AI agent consumption. Built for speed, efficiency, and deterministic execution.
 
 ## Features
 
@@ -14,12 +14,15 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 - **Docs**: Read documents as Markdown, append content, create documents, and find/replace text
 - **Sheets**: Read, write, append, create spreadsheets, and clear ranges
 - **Slides**: Get presentations, extract text, and access individual slides
+- **Chat**: List spaces, send messages, DMs, unread detection, mark-read (single + bulk), mute-aware filtering
+- **Contacts**: List, search, get, create, update, delete contacts, directory list/search
+- **Groups**: List group memberships, list group members
 - **Tasks**: Manage task lists and individual tasks
 - **Batch**: Execute up to 100 API requests in a single HTTP call for maximum efficiency
 
 ### Key Capabilities
 
-- **Structured Output**: All responses in JSON/JSONL/CSV formats
+- **Structured Output**: All responses in TOON (default, token-efficient), JSON, JSONL, or CSV formats
 - **Field Masking**: Reduce token costs by selecting only needed fields
 - **Rate Limiting**: Built-in retry logic with exponential backoff
 - **Streaming**: JSONL output for real-time processing of paginated results
@@ -71,6 +74,9 @@ For user-attended sessions with browser-based authentication:
      - Google Sheets API
      - Google Slides API
      - Google Tasks API
+     - Google Chat API
+     - People API (Contacts)
+     - Cloud Identity API (Groups)
 
 3. **Create OAuth2 Credentials**
    - Go to "APIs & Services" > "Credentials"
@@ -431,7 +437,13 @@ Status values:
 
 Control output format with the `--format` flag:
 
-### JSON (Default)
+### TOON (Default)
+Token-Oriented Object Notation — ~50-60% fewer tokens than JSON, ideal for LLM consumption:
+```bash
+workspace-cli gmail list --limit 2
+```
+
+### JSON
 Pretty-printed JSON for human readability:
 ```bash
 workspace-cli gmail list --limit 2 --format json
@@ -616,7 +628,7 @@ Configure workspace-cli behavior via environment variables:
 |----------|-------------|---------|
 | `WORKSPACE_CREDENTIALS_PATH` | Path to OAuth credentials JSON | `/path/to/credentials.json` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to service account key JSON | `/path/to/service-account.json` |
-| `WORKSPACE_OUTPUT_FORMAT` | Default output format | `json`, `jsonl`, `csv` |
+| `WORKSPACE_OUTPUT_FORMAT` | Default output format | `toon`, `json`, `jsonl`, `csv` |
 | `RUST_LOG` | Logging level | `debug`, `info`, `warn`, `error` |
 
 Example usage:

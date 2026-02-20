@@ -2,6 +2,7 @@ pub mod types;
 pub mod get;
 pub mod update;
 pub mod create;
+pub mod manage;
 
 // Re-export commonly used types
 pub use types::{
@@ -36,3 +37,6 @@ pub use update::{
 
 // Re-export create functions
 pub use create::{create_spreadsheet, create_spreadsheet_with_sheets};
+
+// Re-export manage functions
+pub use manage::{add_sheet, delete_sheet, BatchUpdateResponse};

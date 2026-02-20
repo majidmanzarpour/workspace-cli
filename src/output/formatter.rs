@@ -3,6 +3,7 @@ use std::io::{self, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OutputFormat {
+    Toon,
     Json,
     JsonCompact,
     Jsonl,
@@ -12,6 +13,7 @@ pub enum OutputFormat {
 impl OutputFormat {
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
+            "toon" => Some(Self::Toon),
             "json" => Some(Self::Json),
             "json-compact" | "jsoncompact" => Some(Self::JsonCompact),
             "jsonl" | "ndjson" => Some(Self::Jsonl),
@@ -61,6 +63,32 @@ impl Formatter {
 
     pub fn format(&self) -> OutputFormat {
         self.format
+    }
+
+    /// Remove duplicate string values within the same object level (TOON dedup).
+    /// If multiple fields have the same string value, only the first is kept.
+    /// Applied recursively to nested objects and arrays.
+    fn dedup_string_values(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut seen_strings = std::collections::HashSet::new();
+                let mut deduped = serde_json::Map::new();
+                for (key, val) in map {
+                    let val = Self::dedup_string_values(val);
+                    if let serde_json::Value::String(ref s) = val {
+                        if !s.is_empty() && !seen_strings.insert(s.clone()) {
+                            continue; // skip duplicate string value
+                        }
+                    }
+                    deduped.insert(key, val);
+                }
+                serde_json::Value::Object(deduped)
+            }
+            serde_json::Value::Array(arr) => {
+                serde_json::Value::Array(arr.into_iter().map(Self::dedup_string_values).collect())
+            }
+            other => other,
+        }
     }
 
     /// Filter a JSON value to only include specified fields
@@ -185,6 +213,12 @@ impl Formatter {
         let filtered = self.filter_fields(value);
 
         match self.format {
+            OutputFormat::Toon => {
+                let deduped = Self::dedup_string_values(filtered);
+                let toon = toon_format::encode(&deduped, &toon_format::EncodeOptions::default())
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+                writeln!(self.writer, "{}", toon)
+            }
             OutputFormat::Json => {
                 let json = serde_json::to_string_pretty(&filtered)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -214,6 +248,16 @@ impl Formatter {
         }
 
         match self.format {
+            OutputFormat::Toon => {
+                // Convert to JSON value for field filtering, then encode as TOON
+                let value = serde_json::to_value(items)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let filtered = self.filter_fields(value);
+                let deduped = Self::dedup_string_values(filtered);
+                let toon = toon_format::encode(&deduped, &toon_format::EncodeOptions::default())
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+                writeln!(self.writer, "{}", toon)
+            }
             OutputFormat::Json | OutputFormat::JsonCompact => {
                 // Convert to JSON value for field filtering
                 let value = serde_json::to_value(items)
@@ -227,13 +271,7 @@ impl Formatter {
                 }.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(self.writer, "{}", json)
             }
-            OutputFormat::Jsonl => {
-                for item in items {
-                    self.write(item)?;
-                }
-                Ok(())
-            }
-            OutputFormat::Csv => {
+            OutputFormat::Jsonl | OutputFormat::Csv => {
                 for item in items {
                     self.write(item)?;
                 }
@@ -250,7 +288,7 @@ impl Formatter {
         match self.format {
             OutputFormat::Json => write!(self.writer, "["),
             OutputFormat::JsonCompact => write!(self.writer, "["),
-            _ => Ok(()),
+            OutputFormat::Toon | OutputFormat::Jsonl | OutputFormat::Csv => Ok(()),
         }
     }
 
@@ -266,6 +304,12 @@ impl Formatter {
         let filtered = self.filter_fields(value);
 
         match self.format {
+            OutputFormat::Toon => {
+                let deduped = Self::dedup_string_values(filtered);
+                let toon = toon_format::encode(&deduped, &toon_format::EncodeOptions::default())
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+                writeln!(self.writer, "{}", toon)
+            }
             OutputFormat::Json | OutputFormat::JsonCompact => {
                 if !self.first_item {
                     write!(self.writer, ",")?;
@@ -307,7 +351,7 @@ impl Formatter {
         match self.format {
             OutputFormat::Json => writeln!(self.writer, "\n]"),
             OutputFormat::JsonCompact => writeln!(self.writer, "]"),
-            _ => Ok(()),
+            OutputFormat::Toon | OutputFormat::Jsonl | OutputFormat::Csv => Ok(()),
         }
     }
 
@@ -387,5 +431,11 @@ pub fn output_json<T: Serialize>(item: &T) -> io::Result<()> {
 /// Convenience function to output as JSONL
 pub fn output_jsonl<T: Serialize>(item: &T) -> io::Result<()> {
     let mut formatter = Formatter::new(OutputFormat::Jsonl);
+    formatter.write(item)
+}
+
+/// Convenience function to output as TOON
+pub fn output_toon<T: Serialize>(item: &T) -> io::Result<()> {
+    let mut formatter = Formatter::new(OutputFormat::Toon);
     formatter.write(item)
 }

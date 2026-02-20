@@ -8,6 +8,7 @@ pub mod batch_endpoints {
     pub const GMAIL: &str = "https://gmail.googleapis.com/batch/gmail/v1";
     pub const DRIVE: &str = "https://www.googleapis.com/batch/drive/v3";
     pub const CALENDAR: &str = "https://www.googleapis.com/batch/calendar/v3";
+    pub const CHAT: &str = "https://chat.googleapis.com/batch";
 }
 
 /// A single request in a batch
@@ -114,6 +115,11 @@ impl BatchClient {
     /// Create a Calendar batch client
     pub fn calendar() -> Self {
         Self::new(batch_endpoints::CALENDAR)
+    }
+
+    /// Create a Chat batch client
+    pub fn chat() -> Self {
+        Self::new(batch_endpoints::CHAT)
     }
 
     /// Execute a batch of requests
@@ -233,8 +239,10 @@ impl BatchClient {
             .find(|l| l.to_lowercase().starts_with("content-id:"))
             .and_then(|l| {
                 let id = l.split(':').nth(1)?.trim();
-                // Remove < > brackets if present
-                Some(id.trim_matches(|c| c == '<' || c == '>' || c == ' ').to_string())
+                // Remove < > brackets and Google's "response-" prefix if present
+                let cleaned = id.trim_matches(|c| c == '<' || c == '>' || c == ' ');
+                let cleaned = cleaned.strip_prefix("response-").unwrap_or(cleaned);
+                Some(cleaned.to_string())
             })
             .unwrap_or_default();
 

@@ -9,6 +9,7 @@ use yup_oauth2::{
 };
 
 /// All scopes needed for Google Workspace APIs
+/// All scopes for interactive OAuth flow (user consents to all at once)
 pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/drive",
@@ -17,7 +18,61 @@ pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/presentations",
     "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/chat.spaces",
+    "https://www.googleapis.com/auth/chat.messages",
+    "https://www.googleapis.com/auth/chat.memberships",
+    "https://www.googleapis.com/auth/chat.users.readstate",
+    "https://www.googleapis.com/auth/chat.users.spacesettings",
+    "https://www.googleapis.com/auth/contacts",
+    "https://www.googleapis.com/auth/directory.readonly",
+    "https://www.googleapis.com/auth/cloud-identity.groups.readonly",
+    "https://www.googleapis.com/auth/admin.directory.group.readonly",
+    "https://www.googleapis.com/auth/admin.directory.user.readonly",
 ];
+
+/// Get scopes for a specific service (used with --as to request only needed scopes)
+pub fn scopes_for_service(service: &str) -> &'static [&'static str] {
+    match service {
+        "gmail" => &[
+            "https://mail.google.com/",
+        ],
+        "drive" => &[
+            "https://www.googleapis.com/auth/drive",
+        ],
+        "calendar" => &[
+            "https://www.googleapis.com/auth/calendar",
+        ],
+        "docs" => &[
+            "https://www.googleapis.com/auth/documents",
+            "https://www.googleapis.com/auth/drive",
+        ],
+        "sheets" => &[
+            "https://www.googleapis.com/auth/spreadsheets",
+        ],
+        "slides" => &[
+            "https://www.googleapis.com/auth/presentations",
+        ],
+        "tasks" => &[
+            "https://www.googleapis.com/auth/tasks",
+        ],
+        "chat" => &[
+            "https://www.googleapis.com/auth/chat.spaces",
+            "https://www.googleapis.com/auth/chat.messages",
+            "https://www.googleapis.com/auth/chat.memberships",
+        ],
+        "contacts" => &[
+            "https://www.googleapis.com/auth/contacts",
+        ],
+        "groups" => &[
+            "https://www.googleapis.com/auth/cloud-identity",
+        ],
+        "admin" => &[
+            "https://www.googleapis.com/auth/admin.directory.user.readonly",
+            "https://www.googleapis.com/auth/admin.reports.audit.readonly",
+        ],
+        _ => SCOPES,
+    }
+}
 
 pub type WorkspaceAuthenticator = Authenticator<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>;
 
@@ -38,14 +93,20 @@ pub async fn create_installed_flow_auth(
 }
 
 /// Create an authenticator using service account (headless)
+/// When `subject` is provided, uses domain-wide delegation to impersonate that user
 pub async fn create_service_account_auth(
     service_account_path: &Path,
+    subject: Option<&str>,
 ) -> Result<WorkspaceAuthenticator, AuthError> {
     let sa_key = yup_oauth2::read_service_account_key(service_account_path)
         .await
         .map_err(|e| AuthError::InvalidCredentials(e.to_string()))?;
 
-    let auth = ServiceAccountAuthenticator::builder(sa_key)
+    let mut builder = ServiceAccountAuthenticator::builder(sa_key);
+    if let Some(email) = subject {
+        builder = builder.subject(email);
+    }
+    let auth = builder
         .build()
         .await
         .map_err(|e| AuthError::FlowFailed(e.to_string()))?;

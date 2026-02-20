@@ -65,7 +65,10 @@ pub async fn enrich_messages(
     // Parse responses into MessageSummary
     let mut summaries = Vec::new();
     for resp in responses {
-        let id = resp.id.clone();
+        let id = resp.body.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&resp.id)
+            .to_string();
         let thread_id = resp.body.get("threadId")
             .and_then(|v| v.as_str())
             .unwrap_or(&id)

@@ -14,6 +14,40 @@ pub struct File {
     pub created_time: Option<String>,
     pub modified_time: Option<String>,
     pub trashed: Option<bool>,
+    #[serde(default)]
+    pub owners: Vec<FileOwner>,
+    pub shared: Option<bool>,
+    pub drive_id: Option<String>,
+    pub sharing_user: Option<FileOwner>,
+    #[serde(default)]
+    pub permissions: Vec<FilePermission>,
+    pub viewed_by_me_time: Option<String>,
+    pub shortcut_details: Option<ShortcutDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutDetails {
+    pub target_id: Option<String>,
+    pub target_mime_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOwner {
+    pub email_address: Option<String>,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePermission {
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub permission_type: Option<String>,
+    pub role: Option<String>,
+    pub email_address: Option<String>,
+    pub domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +57,23 @@ pub struct FileList {
     pub files: Vec<File>,
     pub next_page_token: Option<String>,
     pub incomplete_search: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDrive {
+    pub id: String,
+    pub name: String,
+    pub kind: Option<String>,
+    pub created_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDriveList {
+    #[serde(default)]
+    pub drives: Vec<SharedDrive>,
+    pub next_page_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
