@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**workspace-cli** is a high-performance Rust CLI for Google Workspace APIs, optimized for AI agent integration. It provides structured JSON output for Gmail, Drive, Calendar, Docs, Sheets, Slides, and Tasks.
+**workspace-cli** is a high-performance Rust CLI for Google Workspace APIs, optimized for AI agent integration. It provides structured output (TOON/JSON/JSONL/CSV) for Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Chat, Contacts, and Groups.
 
 **Author:** Majid Manzarpour
 **License:** MIT
@@ -35,7 +35,7 @@ workspace-cli auth logout
 
 ```
 src/
-├── main.rs              # CLI entry point, clap command definitions (~2000 lines)
+├── main.rs              # CLI entry point, clap command definitions (~3000 lines)
 ├── lib.rs               # Library exports
 ├── cli.rs               # CLI context utilities
 ├── auth/                # OAuth2 & token management
@@ -55,10 +55,14 @@ src/
 │   ├── sheets/          # get, update, append, create, clear
 │   ├── slides/          # get presentation/page
 │   ├── tasks/           # lists, list, create, update, delete
+│   ├── chat/            # spaces, messages, read-state, unread, mark-read
+│   ├── contacts/        # list, search, get, create, delete, directory
+│   ├── groups/          # list, members
+│   ├── admin/           # users, reports
 │   └── batch/           # CLI wrapper for batch API requests
 ├── config/              # Config file handling (~/.config/workspace-cli/)
 ├── error/               # Structured error types (CliError, WorkspaceError)
-├── output/              # Formatter (JSON/JSONL/CSV), field filtering
+├── output/              # Formatter (TOON/JSON/JSONL/CSV), field filtering
 └── utils/               # base64, field_mask, html_to_md
 ```
 
@@ -74,6 +78,10 @@ ApiClient::docs(token_manager)     // Docs API client
 ApiClient::sheets(token_manager)   // Sheets API client
 ApiClient::slides(token_manager)   // Slides API client
 ApiClient::tasks(token_manager)    // Tasks API client
+ApiClient::chat(token_manager)     // Chat API client
+ApiClient::contacts(token_manager) // Contacts (People) API client
+ApiClient::groups(token_manager)   // Groups (Cloud Identity) API client
+ApiClient::admin(token_manager)    // Admin Directory API client
 ```
 
 ### API Endpoints (`src/client/api_client.rs:11-19`)
@@ -85,11 +93,15 @@ DOCS:     "https://docs.googleapis.com/v1"
 SHEETS:   "https://sheets.googleapis.com/v4"
 SLIDES:   "https://slides.googleapis.com/v1"
 TASKS:    "https://tasks.googleapis.com/tasks/v1"
+CHAT:     "https://chat.googleapis.com/v1"
+CONTACTS: "https://people.googleapis.com/v1"
+GROUPS:   "https://cloudidentity.googleapis.com/v1"
+ADMIN:    "https://admin.googleapis.com/admin/directory/v1"
 ```
 
 ### Output Formatter (`src/output/formatter.rs`)
-Handles JSON, JSON-compact, JSONL, and CSV output with field filtering:
-- `--format json|json-compact|jsonl|csv`
+Handles TOON, JSON, JSON-compact, JSONL, and CSV output with field filtering:
+- `--format toon|json|json-compact|jsonl|csv` (default: toon)
 - `--fields "id,name,mimeType"` - Filter output fields
 - `--quiet` - Suppress output
 - `--output file.json` - Write to file
@@ -114,10 +126,11 @@ ErrorCode::ServerError
 
 ### Global Options (all commands)
 ```
--f, --format <FORMAT>    Output format: json, jsonl, csv [default: json]
+-f, --format <FORMAT>    Output format: toon, json, jsonl, csv [default: toon]
 --fields <FIELDS>        Comma-separated fields to include
 -o, --output <FILE>      Write output to file
 -q, --quiet              Suppress non-essential output
+--as <EMAIL>             Impersonate user via domain-wide delegation (requires service account)
 ```
 
 ### Gmail Commands
@@ -142,7 +155,8 @@ gmail modify <id> [--add-labels L1,L2] [--remove-labels L3] [--mark-read] [--mar
 
 ### Drive Commands
 ```bash
-drive list [--query <q>] [--limit 20] [--parent <folder-id>]
+drive list [--query <q>] [--limit 20] [--parent <folder-id>] [--corpora user|domain|drive|allDrives]
+drive tree <folder-id> [--max-depth N] [--concurrency 10] [--include-permissions]
 drive get <id>
 drive upload <file> [--parent <folder-id>] [--name <name>]
 drive download <id> [--output <path>]
@@ -186,6 +200,9 @@ sheets create <title>
 sheets update <id> --range "Sheet1!A1:B2" --values '[["Name","Value"],["A","1"]]'
 sheets append <id> --range "Sheet1!A1" --values '[["Row1","Data"]]'
 sheets clear <id> --range "Sheet1!A1:C10"
+sheets list-sheets <id>                         # List sheet tabs with numeric IDs
+sheets manage <id> --add-sheet "NewTab"          # Add a sheet tab
+sheets manage <id> --delete-sheet <sheet-id>     # Delete a sheet tab by numeric ID
 ```
 
 **Token Optimization:** `sheets get` returns just the values array by default (~50% reduction). Use `--full` for range metadata wrapper.
@@ -208,6 +225,50 @@ tasks delete <id> [--list @default]
 ```
 
 **Token Optimization:** `tasks list` returns minimal task fields (id, title, status, due, notes, completed) by default (~40% reduction). Use `--full` for etag, selfLink, links, parent, position, etc.
+
+### Chat Commands
+```bash
+chat spaces-list [--type SPACE|DIRECT_MESSAGE|GROUP_CHAT]
+chat spaces-find --query "name"
+chat find-dm --email user@company.com
+chat messages-list --space spaces/abc123 [--today] [--after <time>] [--before <time>] [--order desc|asc]
+chat get <message-resource-name>
+chat send --space spaces/abc123 --text "Hello"
+chat unread [--type all|SPACE|DIRECT_MESSAGE|GROUP_CHAT] [--since 7d] [--include-muted]
+chat read-state --space spaces/abc123
+chat thread-read-state --space spaces/abc123 --thread <thread-id>
+chat mark-read --space spaces/abc123 [--time <timestamp>]
+chat mark-read --all [--type all] [--since 7d]
+```
+
+**Note:** Chat API requires configuring a Chat app in the Google Cloud Console, not just enabling the API.
+
+### Contacts Commands
+```bash
+contacts list [--limit 20]
+contacts search --query "John"
+contacts get <people/c123456>
+contacts create --given-name "John" [--family-name "Doe"] [--email user@example.com] [--phone "+1234567890"]
+contacts delete <people/c123456>
+contacts directory-list [--limit 20]
+contacts directory-search --query "Jane"
+```
+
+### Groups Commands
+```bash
+groups list --email user@company.com    # Groups a user belongs to
+groups list --domain company.com        # All groups in a domain
+groups members group@company.com        # List group members
+```
+
+**Note:** Groups commands require a Google Workspace domain account (not personal Gmail).
+
+### Admin Commands
+```bash
+admin users [--domain company.com] [--limit 100]
+admin user <user-key>                   # Get a specific user by email or ID
+admin reports drive-activity [--user user@company.com] [--limit 1000]
+```
 
 ### Batch Commands
 Execute up to 100 API requests in a single HTTP call:
@@ -270,6 +331,15 @@ echo '<json>' | batch gmail               # Read from stdin
 | "my tasks" / "todo list" | `tasks list` |
 | "add task" | `tasks create "title"` |
 | "complete task" | `tasks update <id> --complete` |
+| "chat spaces" / "my chats" | `chat spaces-list` |
+| "DMs" / "direct messages" | `chat spaces-list --type DIRECT_MESSAGE` |
+| "send chat message" | `chat send --space spaces/ID --text "..."` |
+| "unread messages" (chat) | `chat unread` |
+| "my contacts" | `contacts list --limit 20` |
+| "find contact X" | `contacts search --query "X"` |
+| "list groups" | `groups list --email user@company.com` |
+| "group members" | `groups members group@company.com` |
+| "folder tree" / "list all files" | `drive tree <folder-id>` |
 | "batch request" / "bulk operation" | `batch gmail/drive/calendar --requests '[...]'` |
 | "get multiple emails at once" | `batch gmail --requests '[{"id":"1","method":"GET","path":"/gmail/v1/users/me/messages/id1"},...]'` |
 | "star all these messages" | `batch gmail --requests '[{"id":"1","method":"POST","path":"/gmail/v1/users/me/messages/id1/modify","body":{"addLabelIds":["STARRED"]}}]'` |
@@ -314,10 +384,11 @@ max_retries = 3
 ```bash
 WORKSPACE_CREDENTIALS_PATH      # OAuth credentials JSON path
 GOOGLE_APPLICATION_CREDENTIALS  # Service account JSON path
-WORKSPACE_OUTPUT_FORMAT         # Default output format
+WORKSPACE_OUTPUT_FORMAT         # Default output format (toon, json, jsonl, csv)
 WORKSPACE_OUTPUT_COMPACT        # true/false
 WORKSPACE_API_TIMEOUT           # Timeout in seconds
 WORKSPACE_API_MAX_RETRIES       # Max retry attempts
+WORKSPACE_IMPERSONATE           # Email to impersonate via domain-wide delegation
 RUST_LOG                        # Logging level (debug, info, warn, error)
 ```
 
@@ -329,6 +400,8 @@ API list responses wrap items in arrays:
 - Gmail: `{ "messages": [...], "resultSizeEstimate": N }`
 - Tasks: `{ "items": [...] }`
 - Calendar: `{ "items": [...] }`
+- Chat: `{ "spaces": [...] }` or `{ "messages": [...] }`
+- Contacts: `{ "connections": [...] }` or `{ "results": [...] }`
 
 The `--fields` flag filters within these arrays, not at root level.
 
@@ -379,6 +452,8 @@ RUST_LOG=debug ./target/release/workspace-cli gmail list --limit 1
 ./target/release/workspace-cli gmail labels
 ./target/release/workspace-cli tasks lists
 ./target/release/workspace-cli calendar list --time-min "2025-01-01T00:00:00Z"
+./target/release/workspace-cli contacts list --limit 3
+./target/release/workspace-cli chat spaces-list
 ```
 
 ### Common Build Issues

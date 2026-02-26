@@ -34,6 +34,7 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 html2text = "0.12"
 csv = "1"
+toon-format = "0.4"
 mime = "0.3"
 mime_guess = "2"
 rand = "0.8"

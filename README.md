@@ -4,7 +4,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 ## Overview
 
-`workspace-cli` is a Rust-based command-line tool designed to provide programmatic access to Google Workspace APIs with structured JSON output optimized for AI agent consumption. Built for speed, efficiency, and deterministic execution.
+`workspace-cli` is a Rust-based command-line tool designed to provide programmatic access to Google Workspace APIs with structured output (TOON/JSON/JSONL/CSV) optimized for AI agent consumption. Built for speed, efficiency, and deterministic execution.
 
 ## Features
 
@@ -14,12 +14,15 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 - **Docs**: Read documents as Markdown, append content, create documents, and find/replace text
 - **Sheets**: Read, write, append, create spreadsheets, and clear ranges
 - **Slides**: Get presentations, extract text, and access individual slides
+- **Chat**: List spaces, send messages, DMs, unread detection, mark-read (single + bulk), mute-aware filtering
+- **Contacts**: List, search, get, create, update, delete contacts, directory list/search
+- **Groups**: List group memberships, list group members
 - **Tasks**: Manage task lists and individual tasks
 - **Batch**: Execute up to 100 API requests in a single HTTP call for maximum efficiency
 
 ### Key Capabilities
 
-- **Structured Output**: All responses in JSON/JSONL/CSV formats
+- **Structured Output**: All responses in TOON (default, token-efficient), JSON, JSONL, or CSV formats
 - **Field Masking**: Reduce token costs by selecting only needed fields
 - **Rate Limiting**: Built-in retry logic with exponential backoff
 - **Streaming**: JSONL output for real-time processing of paginated results
@@ -71,6 +74,13 @@ For user-attended sessions with browser-based authentication:
      - Google Sheets API
      - Google Slides API
      - Google Tasks API
+     - Google Chat API (requires additional setup — see note below)
+     - People API (Contacts)
+     - Admin SDK API (Groups)
+
+   **Chat API Setup:** Enabling the Chat API alone is not sufficient. You must also configure a Chat app in the [Google Cloud Console](https://console.cloud.google.com/apis/api/chat.googleapis.com/hangouts-chat) (set an app name and configure it) before Chat commands will work.
+
+   **Groups:** The `groups` commands use the Admin SDK API and require a Google Workspace account. They will not work with personal Gmail accounts.
 
 3. **Create OAuth2 Credentials**
    - Go to "APIs & Services" > "Credentials"
@@ -374,6 +384,75 @@ workspace-cli tasks update <task-id> --complete
 workspace-cli tasks delete <task-id>
 ```
 
+### Chat Examples
+
+```bash
+# List all Chat spaces
+workspace-cli chat spaces-list
+
+# List only DM spaces
+workspace-cli chat spaces-list --type DIRECT_MESSAGE
+
+# Find spaces by name
+workspace-cli chat spaces-find --query "Project Alpha"
+
+# Find a DM space by email
+workspace-cli chat find-dm --email user@company.com
+
+# List messages in a space
+workspace-cli chat messages-list --space spaces/abc123
+
+# List today's messages
+workspace-cli chat messages-list --space spaces/abc123 --today
+
+# Get a specific message
+workspace-cli chat get spaces/abc123/messages/msg456
+
+# Check unread messages across all spaces
+workspace-cli chat unread
+
+# Get read state for a space
+workspace-cli chat read-state --space spaces/abc123
+
+# Send a message
+workspace-cli chat send --space spaces/abc123 --text 'Hello team'
+
+# Mark a space as read
+workspace-cli chat mark-read --space spaces/abc123
+```
+
+### Contacts Examples
+
+```bash
+# List contacts
+workspace-cli contacts list --limit 20
+
+# Search contacts
+workspace-cli contacts search --query "John"
+
+# Get a specific contact
+workspace-cli contacts get people/c123456
+
+# List workspace directory
+workspace-cli contacts directory-list
+
+# Search workspace directory
+workspace-cli contacts directory-search --query "Jane"
+```
+
+### Groups Examples
+
+```bash
+# List groups for a user
+workspace-cli groups list --email user@company.com
+
+# List all groups in a domain
+workspace-cli groups list --domain company.com
+
+# List group members
+workspace-cli groups members group@company.com
+```
+
 ### Batch Examples
 
 Execute multiple API requests in a single HTTP call for maximum efficiency:
@@ -431,7 +510,13 @@ Status values:
 
 Control output format with the `--format` flag:
 
-### JSON (Default)
+### TOON (Default)
+Token-Oriented Object Notation — ~50-60% fewer tokens than JSON, ideal for LLM consumption:
+```bash
+workspace-cli gmail list --limit 2
+```
+
+### JSON
 Pretty-printed JSON for human readability:
 ```bash
 workspace-cli gmail list --limit 2 --format json
@@ -592,6 +677,40 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `tasks update` | Update a task | `--list`, `--title`, `--complete` |
 | `tasks delete` | Delete a task | `--list` |
 
+### Chat Commands
+
+| Command | Description | Key Options |
+|---------|-------------|-------------|
+| `chat spaces-list` | List Chat spaces | `--type` |
+| `chat spaces-find` | Find spaces by name | `--query` |
+| `chat find-dm` | Find DM space by email | `--email` |
+| `chat messages-list` | List messages in a space | `--space`, `--today` |
+| `chat get` | Get a specific message | None |
+| `chat unread` | Show unread messages | `--since`, `--include-muted` |
+| `chat read-state` | Get read state for a space | `--space` |
+| `chat thread-read-state` | Get read state for a thread | `--space`, `--thread` |
+| `chat mark-read` | Mark a space as read | `--space` |
+| `chat send` | Send a message | `--space`, `--text` |
+
+### Contacts Commands
+
+| Command | Description | Key Options |
+|---------|-------------|-------------|
+| `contacts list` | List contacts | `--limit` |
+| `contacts search` | Search contacts | `--query` |
+| `contacts get` | Get a specific contact | None |
+| `contacts create` | Create a contact | `--given-name`, `--email`, `--phone` |
+| `contacts delete` | Delete a contact | None |
+| `contacts directory-list` | List workspace directory | `--limit` |
+| `contacts directory-search` | Search workspace directory | `--query` |
+
+### Groups Commands
+
+| Command | Description | Key Options |
+|---------|-------------|-------------|
+| `groups list` | List groups | `--email`, `--domain` |
+| `groups members` | List group members | None |
+
 ### Batch Commands
 
 | Command | Description | Key Options |
@@ -616,7 +735,8 @@ Configure workspace-cli behavior via environment variables:
 |----------|-------------|---------|
 | `WORKSPACE_CREDENTIALS_PATH` | Path to OAuth credentials JSON | `/path/to/credentials.json` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to service account key JSON | `/path/to/service-account.json` |
-| `WORKSPACE_OUTPUT_FORMAT` | Default output format | `json`, `jsonl`, `csv` |
+| `WORKSPACE_OUTPUT_FORMAT` | Default output format | `toon`, `json`, `jsonl`, `csv` |
+| `WORKSPACE_IMPERSONATE` | Email to impersonate via domain-wide delegation | `user@company.com` |
 | `RUST_LOG` | Logging level | `debug`, `info`, `warn`, `error` |
 
 Example usage:

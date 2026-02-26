@@ -87,8 +87,24 @@ pub async fn clear_values(
     client.post(&path, &serde_json::json!({})).await
 }
 
-/// Parse values from JSON string input (for CLI usage)
-pub fn parse_values_json(json: &str) -> Result<Vec<Vec<serde_json::Value>>> {
-    serde_json::from_str(json)
+/// Parse values from JSON string, stdin (`-`), or file (`@path`).
+///
+/// - `-` reads JSON from stdin (for piping large data)
+/// - `@/path/to/file.json` reads JSON from a file
+/// - Otherwise parses the string directly as JSON
+pub fn parse_values_json(json_or_source: &str) -> Result<Vec<Vec<serde_json::Value>>> {
+    let json_str = if json_or_source == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)
+            .map_err(|e| crate::error::WorkspaceError::Config(format!("Failed to read stdin: {}", e)))?;
+        buf
+    } else if let Some(path) = json_or_source.strip_prefix('@') {
+        std::fs::read_to_string(path)
+            .map_err(|e| crate::error::WorkspaceError::Config(format!("Failed to read values file '{}': {}", path, e)))?
+    } else {
+        json_or_source.to_string()
+    };
+    serde_json::from_str(&json_str)
         .map_err(|e| crate::error::WorkspaceError::Config(format!("Invalid JSON values: {}", e)))
 }

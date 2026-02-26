@@ -16,15 +16,32 @@ pub mod endpoints {
     pub const SHEETS: &str = "https://sheets.googleapis.com/v4";
     pub const SLIDES: &str = "https://slides.googleapis.com/v1";
     pub const TASKS: &str = "https://tasks.googleapis.com/tasks/v1";
+    pub const CHAT: &str = "https://chat.googleapis.com/v1";
+    pub const CONTACTS: &str = "https://people.googleapis.com/v1";
+    pub const GROUPS: &str = "https://cloudidentity.googleapis.com/v1";
+    pub const ADMIN: &str = "https://admin.googleapis.com/admin/directory/v1";
+    pub const ADMIN_REPORTS: &str = "https://admin.googleapis.com/admin/reports/v1";
 }
 
 /// Google Workspace API client
 pub struct ApiClient {
     http: Client,
     token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>,
-    rate_limiter: Option<ApiRateLimiter>,
+    rate_limiter: Option<std::sync::Arc<ApiRateLimiter>>,
     retry_config: RetryConfig,
     base_url: String,
+}
+
+impl Clone for ApiClient {
+    fn clone(&self) -> Self {
+        Self {
+            http: self.http.clone(),
+            token_manager: self.token_manager.clone(),
+            rate_limiter: self.rate_limiter.clone(),
+            retry_config: self.retry_config.clone(),
+            base_url: self.base_url.clone(),
+        }
+    }
 }
 
 impl ApiClient {
@@ -55,7 +72,7 @@ impl ApiClient {
 
     /// Set rate limiter
     pub fn with_rate_limiter(mut self, limiter: ApiRateLimiter) -> Self {
-        self.rate_limiter = Some(limiter);
+        self.rate_limiter = Some(std::sync::Arc::new(limiter));
         self
     }
 
@@ -121,6 +138,44 @@ impl ApiClient {
             .with_retry_config(RetryConfig::default())
     }
 
+    /// Create a Google Chat client
+    pub fn chat(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::CHAT)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    /// Create a Google Contacts (People API) client
+    pub fn contacts(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::CONTACTS)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    /// Create a Google Groups (Cloud Identity) client
+    pub fn groups(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::GROUPS)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    pub fn admin(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::ADMIN)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
+    pub fn admin_reports(token_manager: std::sync::Arc<tokio::sync::RwLock<TokenManager>>) -> Self {
+        Self::new(token_manager)
+            .with_base_url(endpoints::ADMIN_REPORTS)
+            .with_rate_limiter(ApiRateLimiter::tasks())
+            .with_retry_config(RetryConfig::default())
+    }
+
     /// Build full URL from path
     fn build_url(&self, path: &str) -> String {
         if path.starts_with("http") {
@@ -131,7 +186,7 @@ impl ApiClient {
     }
 
     /// Get access token
-    async fn get_token(&self) -> Result<String, WorkspaceError> {
+    pub async fn get_token(&self) -> Result<String, WorkspaceError> {
         let tm = self.token_manager.read().await;
         tm.get_access_token()
             .await

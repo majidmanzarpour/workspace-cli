@@ -6,6 +6,7 @@ pub mod delete;
 pub mod mkdir;
 pub mod operations;
 pub mod share;
+pub mod tree;
 
 // Re-export commonly used types and functions
 pub use types::{File, FileList, FileMetadata};

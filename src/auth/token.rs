@@ -9,6 +9,10 @@ pub struct TokenManager {
     storage: TokenStorage,
     config: Config,
     credentials_path: Option<PathBuf>,
+    /// Email to impersonate via domain-wide delegation (service account only)
+    subject: Option<String>,
+    /// Service name for per-service scope selection (used with --as)
+    service: Option<String>,
 }
 
 impl TokenManager {
@@ -18,12 +22,25 @@ impl TokenManager {
             authenticator: None,
             storage: TokenStorage::new("default"),
             credentials_path: None,
+            subject: config.auth.impersonate_subject.clone(),
+            service: None,
             config,
         }
     }
 
+    /// Set the email to impersonate via domain-wide delegation
+    pub fn set_subject(&mut self, subject: Option<String>) {
+        self.subject = subject;
+    }
+
+    /// Set the service name for per-service scope selection
+    pub fn set_service(&mut self, service: &str) {
+        self.service = Some(service.to_string());
+    }
+
     /// Try to restore authenticator from cached tokens
     /// Call this before making API requests
+    /// When subject is set, automatically uses service account flow for domain-wide delegation
     pub async fn ensure_authenticated(&mut self) -> Result<(), TokenManagerError> {
         // Already have an authenticator
         if self.authenticator.is_some() {
@@ -34,6 +51,11 @@ impl TokenManager {
             }
             // If token fetch fails, clear the authenticator and retry
             self.authenticator = None;
+        }
+
+        // If impersonation is requested, use service account flow
+        if self.subject.is_some() {
+            return self.login_service_account(None).await;
         }
 
         let token_cache = self.token_cache_path();
@@ -148,7 +170,7 @@ impl TokenManager {
             ));
         }
 
-        let auth = oauth::create_service_account_auth(&sa_path)
+        let auth = oauth::create_service_account_auth(&sa_path, self.subject.as_deref())
             .await
             .map_err(TokenManagerError::Auth)?;
 
@@ -157,11 +179,22 @@ impl TokenManager {
     }
 
     /// Get an access token for API calls
+    /// When impersonating (--as), uses per-service scopes to avoid requesting unauthorized scopes
     pub async fn get_access_token(&self) -> Result<String, TokenManagerError> {
         let auth = self.authenticator.as_ref()
             .ok_or(TokenManagerError::NotAuthenticated)?;
 
-        oauth::get_token(auth, SCOPES)
+        let scopes = if self.subject.is_some() {
+            if let Some(ref svc) = self.service {
+                oauth::scopes_for_service(svc)
+            } else {
+                SCOPES
+            }
+        } else {
+            SCOPES
+        };
+
+        oauth::get_token(auth, scopes)
             .await
             .map_err(TokenManagerError::Auth)
     }
