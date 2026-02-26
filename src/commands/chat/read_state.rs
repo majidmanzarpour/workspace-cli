@@ -130,13 +130,13 @@ pub async fn get_unread_messages(client: &ApiClient, limit_per_space: u32, space
 
         for resp in &batch_responses {
             if !resp.is_success() { continue; }
-            if resp.id.starts_with("rs_") {
-                let space_name = resp.id.trim_start_matches("rs_").to_string();
+            if let Some(space_name) = resp.id.strip_prefix("rs_") {
+                let space_name = space_name.to_string();
                 if let Ok(rs) = resp.parse::<SpaceReadState>() {
                     read_states.insert(space_name, rs);
                 }
-            } else if resp.id.starts_with("ns_") {
-                let space_name = resp.id.trim_start_matches("ns_").to_string();
+            } else if let Some(space_name) = resp.id.strip_prefix("ns_") {
+                let space_name = space_name.to_string();
                 if let Ok(ns) = resp.parse::<SpaceNotificationSetting>() {
                     notif_settings.insert(space_name, ns);
                 }

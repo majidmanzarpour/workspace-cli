@@ -56,6 +56,11 @@ pub async fn create_contact(client: &ApiClient, params: CreateContactParams) -> 
 }
 
 pub async fn delete_contact(client: &ApiClient, resource_name: &str) -> Result<()> {
-    let path = format!("/{}:deleteContact", resource_name);
+    let name = if resource_name.starts_with("people/") {
+        resource_name.to_string()
+    } else {
+        format!("people/{}", resource_name)
+    };
+    let path = format!("/{}:deleteContact", name);
     client.delete(&path).await
 }

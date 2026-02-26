@@ -1,8 +1,6 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{SearchResponse, DirectoryPeopleResponse};
-
-const READ_MASK: &str = "names,emailAddresses,phoneNumbers,organizations,urls";
+use super::types::{SearchResponse, DirectoryPeopleResponse, READ_MASK};
 
 pub async fn search_contacts(client: &ApiClient, query: &str, page_size: u32) -> Result<SearchResponse> {
     let query_params = vec![

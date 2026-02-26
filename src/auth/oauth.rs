@@ -59,12 +59,14 @@ pub fn scopes_for_service(service: &str) -> &'static [&'static str] {
             "https://www.googleapis.com/auth/chat.spaces",
             "https://www.googleapis.com/auth/chat.messages",
             "https://www.googleapis.com/auth/chat.memberships",
+            "https://www.googleapis.com/auth/chat.users.readstate",
+            "https://www.googleapis.com/auth/chat.users.spacesettings",
         ],
         "contacts" => &[
             "https://www.googleapis.com/auth/contacts",
         ],
         "groups" => &[
-            "https://www.googleapis.com/auth/cloud-identity",
+            "https://www.googleapis.com/auth/cloud-identity.groups.readonly",
         ],
         "admin" => &[
             "https://www.googleapis.com/auth/admin.directory.user.readonly",

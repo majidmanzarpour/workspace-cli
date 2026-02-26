@@ -132,6 +132,16 @@ async fn list_all_children(client: &ApiClient, parent_id: &str, include_permissi
     Ok(all_files)
 }
 
+/// Validate that a folder ID contains only safe characters (alphanumeric, dashes, underscores)
+fn validate_folder_id(id: &str) -> Result<()> {
+    if id.is_empty() || !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        return Err(crate::error::WorkspaceError::Config(
+            format!("Invalid folder ID '{}': must contain only alphanumeric characters, dashes, and underscores", id)
+        ).into());
+    }
+    Ok(())
+}
+
 /// Recursively crawl a folder tree with controlled concurrency
 pub async fn crawl_tree(
     client: &ApiClient,
@@ -140,6 +150,8 @@ pub async fn crawl_tree(
     concurrency: usize,
     include_permissions: bool,
 ) -> Result<TreeResult> {
+    // Validate user-supplied root_id to prevent query injection
+    validate_folder_id(root_id)?;
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut all_nodes: Vec<TreeNode> = Vec::new();
 

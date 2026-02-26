@@ -1087,6 +1087,15 @@ async fn main() {
     }
 }
 
+/// Validate and normalize a Chat space type filter value
+fn validate_space_type(t: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let upper = t.to_uppercase();
+    match upper.as_str() {
+        "SPACE" | "DIRECT_MESSAGE" | "GROUP_CHAT" | "ALL" => Ok(upper),
+        _ => Err(format!("Invalid space type '{}': must be one of SPACE, DIRECT_MESSAGE, GROUP_CHAT, or ALL", t).into()),
+    }
+}
+
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // Load config and create shared token manager
     let config = Config::load().with_env_overrides();
@@ -1110,8 +1119,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Contacts { .. } => "contacts",
         Commands::Groups { .. } => "groups",
         Commands::Admin { .. } => "admin",
-        Commands::Batch { .. } => "drive",
-        Commands::Auth { .. } => "drive",
+        Commands::Batch { command: ref batch_cmd } => match batch_cmd {
+            BatchCommands::Gmail { .. } => "gmail",
+            BatchCommands::Drive { .. } => "drive",
+            BatchCommands::Calendar { .. } => "calendar",
+        },
+        Commands::Auth { .. } => "gmail", // auth doesn't make API calls, scope is irrelevant
     };
     tm.set_service(service_name);
 
@@ -2599,7 +2612,13 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
             match command {
                 ChatCommands::SpacesList { limit, space_type } => {
-                    let filter = space_type.map(|t| format!("spaceType = \"{}\"", t.to_uppercase()));
+                    let filter = match space_type {
+                        Some(t) => {
+                            let validated = validate_space_type(&t)?;
+                            if validated == "ALL" { None } else { Some(format!("spaceType = \"{}\"", validated)) }
+                        }
+                        None => None,
+                    };
                     let params = workspace_cli::commands::chat::spaces::ListSpacesParams {
                         page_size: limit, page_token: None, filter,
                     };
@@ -2654,7 +2673,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let order_by = format!("createTime {}", if order.to_lowercase() == "asc" { "ASC" } else { "DESC" });
                     let mut filter_parts: Vec<String> = Vec::new();
                     if today {
-                        let today_start = chrono::Local::now().format("%Y-%m-%dT00:00:00Z").to_string();
+                        let today_start = chrono::Utc::now().format("%Y-%m-%dT00:00:00Z").to_string();
                         filter_parts.push(format!("createTime > \"{}\"", today_start));
                     } else if let Some(ref t) = after {
                         filter_parts.push(format!("createTime > \"{}\"", t));
@@ -2740,7 +2759,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 ChatCommands::Unread { limit, r#type, since, include_muted } => {
-                    let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
+                    let validated_type = validate_space_type(&r#type)?;
+                    let type_filter = if validated_type == "ALL" { None } else { Some(validated_type.as_str()) };
                     match workspace_cli::commands::chat::read_state::get_unread_messages(&client, limit, type_filter, &since, include_muted, None).await {
                         Ok(result) => {
                             if let Some(ref output_path) = cli.output {
@@ -2758,7 +2778,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     if all {
                         // Bulk mode: find all unread spaces, then mark them read
-                        let type_filter = if r#type.to_lowercase() == "all" { None } else { Some(r#type.as_str()) };
+                        let validated_type = validate_space_type(&r#type)?;
+                        let type_filter = if validated_type == "ALL" { None } else { Some(validated_type.as_str()) };
                         match workspace_cli::commands::chat::read_state::get_unread_messages(&client, 1, type_filter, &since, false, None).await {
                             Ok(result) => {
                                 let mut marked = 0usize;
@@ -2898,7 +2919,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     match workspace_cli::commands::contacts::create::delete_contact(&client, &name).await {
                         Ok(()) => {
                             if !quiet {
-                                eprintln!(r#"{{"status":"success","message":"Contact deleted"}}"#);
+                                println!(r#"{{"status":"success","message":"Contact deleted"}}"#);
                             }
                         }
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }

@@ -37,5 +37,16 @@ pub async fn list_users(client: &ApiClient, params: ListUsersParams) -> Result<U
 }
 
 pub async fn get_user(client: &ApiClient, user_key: &str) -> Result<User> {
+    // Validate user_key: must be an email address or alphanumeric user ID
+    if user_key.is_empty()
+        || user_key.contains('/')
+        || user_key.contains('?')
+        || user_key.contains('&')
+        || user_key.contains('#')
+    {
+        return Err(crate::error::WorkspaceError::Config(
+            format!("Invalid user key '{}': must be an email address or user ID", user_key)
+        ).into());
+    }
     client.get(&format!("/users/{}", user_key)).await
 }
