@@ -856,14 +856,17 @@ enum ChatCommands {
         #[arg(long)]
         member: Vec<String>,
     },
-    /// List messages in a space
+    /// List messages in a space (auto-paginates to fetch all results)
     MessagesList {
         /// Space name (e.g. spaces/abc123)
         #[arg(long)]
         space: String,
-        /// Maximum results
-        #[arg(long, default_value = "25")]
-        limit: u32,
+        /// Maximum total messages to return across all pages (omit for unlimited)
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Page size per API request (max 1000)
+        #[arg(long, default_value = "1000")]
+        page_size: u32,
         /// Sort order: desc (newest first) or asc (oldest first)
         #[arg(long, default_value = "desc")]
         order: String,
@@ -876,6 +879,9 @@ enum ChatCommands {
         /// Only show messages from today (shortcut for --after with today's date)
         #[arg(long)]
         today: bool,
+        /// Stop paginating when messages fall outside the --after/--before date window
+        #[arg(long)]
+        limit_by_date: bool,
     },
     /// Get read state for a space (shows lastReadTime)
     ReadState {
@@ -2669,70 +2675,161 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
                 }
-                ChatCommands::MessagesList { space, limit, order, after, before, today } => {
-                    let order_by = format!("createTime {}", if order.to_lowercase() == "asc" { "ASC" } else { "DESC" });
+                ChatCommands::MessagesList { space, limit, page_size, order, after, before, today, limit_by_date } => {
+                    let is_asc = order.to_lowercase() == "asc";
+                    let order_by = format!("createTime {}", if is_asc { "ASC" } else { "DESC" });
                     let mut filter_parts: Vec<String> = Vec::new();
-                    if today {
+                    let effective_after: Option<String> = if today {
                         let today_start = chrono::Utc::now().format("%Y-%m-%dT00:00:00Z").to_string();
                         filter_parts.push(format!("createTime > \"{}\"", today_start));
+                        Some(today_start)
                     } else if let Some(ref t) = after {
                         filter_parts.push(format!("createTime > \"{}\"", t));
-                    }
+                        Some(t.clone())
+                    } else {
+                        None
+                    };
                     if let Some(ref t) = before {
                         filter_parts.push(format!("createTime < \"{}\"", t));
                     }
                     let filter = if filter_parts.is_empty() { None } else { Some(filter_parts.join(" AND ")) };
-                    let params = workspace_cli::commands::chat::messages::ListMessagesParams {
-                        space_name: space,
-                        page_size: limit,
-                        page_token: None,
-                        order_by: Some(order_by),
-                        filter,
+
+                    // Parse date boundaries for early-stop when --limit-by-date is set
+                    let after_boundary = if limit_by_date {
+                        effective_after.as_ref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                    } else { None };
+                    let before_boundary = if limit_by_date {
+                        before.as_ref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                    } else { None };
+
+                    // Clamp page_size: API max is 1000; if limit is set and smaller, use limit
+                    let api_page_size = {
+                        let clamped = page_size.min(1000);
+                        match limit {
+                            Some(l) if l < clamped => l,
+                            _ => clamped,
+                        }
                     };
-                    match workspace_cli::commands::chat::messages::list_messages(&client, params).await {
-                        Ok(mut response) => {
-                            // Resolve sender displayNames via Admin Directory API
-                            let user_ids: std::collections::HashSet<String> = response.messages.iter()
-                                .filter_map(|m| m.sender.as_ref())
-                                .filter(|s| s.display_name.is_none())
-                                .filter_map(|s| s.name.as_ref())
-                                .filter(|n| n.starts_with("users/"))
-                                .map(|n| n.strip_prefix("users/").unwrap().to_string())
-                                .collect();
-                            if !user_ids.is_empty() {
-                                let admin_client = ApiClient::admin(token_manager.clone());
-                                let mut name_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-                                for uid in &user_ids {
-                                    if let Ok(user) = workspace_cli::commands::admin::users::get_user(&admin_client, uid).await {
-                                        if let Some(uname) = user.name {
-                                            if let Some(full) = uname.full_name {
-                                                name_map.insert(uid.clone(), full);
-                                            }
+
+                    // Set up streaming formatter
+                    let mut out: Formatter = if let Some(ref output_path) = cli.output {
+                        let file = std::fs::File::create(output_path)?;
+                        Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                    } else {
+                        Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                    };
+                    out.start_stream()?;
+
+                    let admin_client = ApiClient::admin(token_manager.clone());
+                    let mut name_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                    let mut total_output: u32 = 0;
+                    let mut page_token: Option<String> = None;
+
+                    loop {
+                        let params = workspace_cli::commands::chat::messages::ListMessagesParams {
+                            space_name: space.clone(),
+                            page_size: api_page_size,
+                            page_token: page_token.clone(),
+                            order_by: Some(order_by.clone()),
+                            filter: filter.clone(),
+                        };
+                        let mut response = match workspace_cli::commands::chat::messages::list_messages(&client, params).await {
+                            Ok(r) => r,
+                            Err(e) => {
+                                // On error mid-pagination, close stream and output what we have
+                                let _ = out.end_stream();
+                                eprintln!(r#"{{"status":"error","message":"{}","messages_fetched":{}}}"#, e, total_output);
+                                std::process::exit(1);
+                            }
+                        };
+
+                        if response.messages.is_empty() {
+                            break;
+                        }
+
+                        // --limit-by-date: check if the last message on this page has left the date window
+                        // For desc order: messages go newest→oldest, so if last msg < after_boundary, we've exited
+                        // For asc order: messages go oldest→newest, so if last msg > before_boundary, we've exited
+                        let date_stop = if limit_by_date {
+                            if let Some(last_msg) = response.messages.last() {
+                                if let Some(ref ct) = last_msg.create_time {
+                                    if let Ok(msg_time) = chrono::DateTime::parse_from_rfc3339(ct) {
+                                        if !is_asc {
+                                            // desc: stop if last message is at or before the after boundary
+                                            after_boundary.map_or(false, |ab| msg_time <= ab)
+                                        } else {
+                                            // asc: stop if last message is at or after the before boundary
+                                            before_boundary.map_or(false, |bb| msg_time >= bb)
                                         }
+                                    } else { false }
+                                } else { false }
+                            } else { false }
+                        } else { false };
+
+                        // Resolve sender displayNames incrementally (only new user IDs)
+                        let new_user_ids: std::collections::HashSet<String> = response.messages.iter()
+                            .filter_map(|m| m.sender.as_ref())
+                            .filter(|s| s.display_name.is_none())
+                            .filter_map(|s| s.name.as_ref())
+                            .filter(|n| n.starts_with("users/"))
+                            .map(|n| n.strip_prefix("users/").unwrap().to_string())
+                            .filter(|uid| !name_map.contains_key(uid))
+                            .collect();
+                        for uid in &new_user_ids {
+                            if let Ok(user) = workspace_cli::commands::admin::users::get_user(&admin_client, uid).await {
+                                if let Some(uname) = user.name {
+                                    if let Some(full) = uname.full_name {
+                                        name_map.insert(uid.clone(), full);
                                     }
                                 }
-                                for msg in &mut response.messages {
-                                    if let Some(ref mut sender) = msg.sender {
-                                        if sender.display_name.is_none() {
-                                            if let Some(ref name) = sender.name {
-                                                if let Some(uid) = name.strip_prefix("users/") {
-                                                    if let Some(resolved) = name_map.get(uid) {
-                                                        sender.display_name = Some(resolved.clone());
-                                                    }
-                                                }
+                            }
+                        }
+                        for msg in &mut response.messages {
+                            if let Some(ref mut sender) = msg.sender {
+                                if sender.display_name.is_none() {
+                                    if let Some(ref name) = sender.name {
+                                        if let Some(uid) = name.strip_prefix("users/") {
+                                            if let Some(resolved) = name_map.get(uid) {
+                                                sender.display_name = Some(resolved.clone());
                                             }
                                         }
                                     }
                                 }
                             }
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                ff.write(&response)?;
-                            } else { formatter.write(&response)?; }
                         }
-                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+
+                        // Stream each message, respecting total limit
+                        for msg in &response.messages {
+                            if let Some(l) = limit {
+                                if total_output >= l {
+                                    break;
+                                }
+                            }
+                            out.stream_item(msg)?;
+                            total_output += 1;
+                        }
+
+                        // Check if we've hit the total limit or date boundary
+                        if let Some(l) = limit {
+                            if total_output >= l {
+                                break;
+                            }
+                        }
+                        if date_stop {
+                            break;
+                        }
+
+                        // Check for next page
+                        match response.next_page_token {
+                            Some(token) if !token.is_empty() => {
+                                page_token = Some(token);
+                            }
+                            _ => break,
+                        }
                     }
+
+                    out.end_stream()?;
+                    out.flush()?;
                 }
                 ChatCommands::ReadState { space } => {
                     match workspace_cli::commands::chat::read_state::get_space_read_state(&client, &space).await {
