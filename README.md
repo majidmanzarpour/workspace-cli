@@ -11,7 +11,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 - **Gmail**: List, read, send, draft, reply, delete, trash/untrash, labels management, and modify messages
 - **Drive**: List, upload, download, delete, trash/untrash, mkdir, move, copy, rename, share, and manage permissions
 - **Calendar**: List, create, update, and delete events with sync token support
-- **Docs**: Read documents as Markdown, append content, create documents, and find/replace text
+- **Docs**: Read documents as Markdown, append content, create documents, find/replace text, and apply rich formatting via batchUpdate (headings, bold, bullets)
 - **Sheets**: Read, write, append, create spreadsheets, and clear ranges
 - **Slides**: Get presentations, extract text, and access individual slides
 - **Chat**: List spaces, send messages, DMs, unread detection, mark-read (single + bulk), mute-aware filtering
@@ -304,6 +304,16 @@ workspace-cli docs replace <doc-id> --find "old text" --with "new text"
 
 # Case-sensitive find and replace
 workspace-cli docs replace <doc-id> --find "OldText" --with "NewText" --match-case
+
+# Apply rich formatting via the Google Docs batchUpdate API
+workspace-cli docs batch-update <doc-id> --payload '{"requests":[
+  {"insertText":{"location":{"index":1},"text":"Title\n"}},
+  {"updateParagraphStyle":{"range":{"startIndex":1,"endIndex":6},"paragraphStyle":{"namedStyleType":"HEADING_1"},"fields":"namedStyleType"}},
+  {"createParagraphBullets":{"range":{"startIndex":8,"endIndex":20},"bulletPreset":"BULLET_DISC_CIRCLE_SQUARE"}}
+]}'
+
+# Load batchUpdate requests from a JSON file
+workspace-cli docs batch-update <doc-id> --file requests.json
 ```
 
 ### Sheets Examples
@@ -649,6 +659,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `docs create` | Create a new document | None |
 | `docs append` | Append text to document | None |
 | `docs replace` | Find and replace text | `--find`, `--with`, `--match-case` |
+| `docs batch-update` | Apply batchUpdate requests (headings, bold, bullets, etc.) | `--payload`, `--file` |
 
 ### Sheets Commands
 
@@ -999,6 +1010,7 @@ For issues, questions, or contributions:
 - [x] ~~Implement remaining commands~~ (All core commands implemented!)
 - [x] ~~Extended field filtering~~ (`--fields` flag for JSON field selection)
 - [x] ~~Batch operations for bulk processing~~ (`batch gmail/drive/calendar` commands)
+- [x] ~~Google Docs batchUpdate support~~ (`docs batch-update` for rich document formatting)
 - [ ] Model Context Protocol (MCP) server mode
 - [ ] Webhook support for real-time notifications
 - [ ] Performance benchmarks and optimizations
