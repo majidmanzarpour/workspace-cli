@@ -30,6 +30,7 @@ pub struct ApiClient {
     rate_limiter: Option<std::sync::Arc<ApiRateLimiter>>,
     retry_config: RetryConfig,
     base_url: String,
+    dry_run: bool,
 }
 
 impl Clone for ApiClient {
@@ -40,6 +41,7 @@ impl Clone for ApiClient {
             rate_limiter: self.rate_limiter.clone(),
             retry_config: self.retry_config.clone(),
             base_url: self.base_url.clone(),
+            dry_run: self.dry_run,
         }
     }
 }
@@ -61,6 +63,7 @@ impl ApiClient {
             rate_limiter: None,
             retry_config: RetryConfig::default(),
             base_url: String::new(),
+            dry_run: false,
         }
     }
 
@@ -79,6 +82,12 @@ impl ApiClient {
     /// Set retry configuration
     pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
         self.retry_config = config;
+        self
+    }
+
+    /// Enable dry-run mode: print the request and exit without executing it
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
         self
     }
 
@@ -258,6 +267,19 @@ impl ApiClient {
         path: &str,
         cost: u32,
     ) -> Result<T, WorkspaceError> {
+        // Dry-run: print request details and exit without executing
+        if self.dry_run {
+            let url = self.build_url(path);
+            let output = serde_json::json!({
+                "dry_run": true,
+                "method": method.as_str(),
+                "url": url,
+                "body": serde_json::Value::Null,
+                "auth": "Bearer [REDACTED]"
+            });
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            std::process::exit(0);
+        }
         // Acquire rate limit
         let _permit: Option<ConcurrencyPermit> = if let Some(ref limiter) = self.rate_limiter {
             limiter.acquire(cost).await.ok().flatten()
@@ -301,6 +323,24 @@ impl ApiClient {
         T: DeserializeOwned,
         B: Serialize + ?Sized,
     {
+        // Dry-run: print request details and exit without executing
+        if self.dry_run {
+            let url = self.build_url(path);
+            let body_json = if let Some(b) = body {
+                serde_json::to_value(b).unwrap_or(serde_json::Value::Null)
+            } else {
+                serde_json::Value::Null
+            };
+            let output = serde_json::json!({
+                "dry_run": true,
+                "method": method.as_str(),
+                "url": url,
+                "body": body_json,
+                "auth": "Bearer [REDACTED]"
+            });
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            std::process::exit(0);
+        }
         // Acquire rate limit
         let _permit: Option<ConcurrencyPermit> = if let Some(ref limiter) = self.rate_limiter {
             limiter.acquire(cost).await.ok().flatten()

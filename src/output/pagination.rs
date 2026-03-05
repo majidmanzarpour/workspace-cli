@@ -214,6 +214,33 @@ where
     }
 }
 
+/// Configuration for auto-pagination via CLI flags
+pub struct PageConfig {
+    pub page_all: bool,
+    pub page_limit: u32,  // 0 = unlimited
+    pub page_delay: u64,  // milliseconds
+}
+
+impl PageConfig {
+    /// Returns true if pagination should continue after this page number (1-indexed)
+    pub fn should_continue(&self, page_num: u32) -> bool {
+        if self.page_all { return true; }
+        if self.page_limit == 0 { return true; }
+        page_num < self.page_limit
+    }
+
+    /// Returns true if auto-pagination is enabled at all
+    pub fn is_enabled(&self) -> bool {
+        self.page_all || self.page_limit > 1
+    }
+
+    pub async fn delay(&self) {
+        if self.page_delay > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(self.page_delay)).await;
+        }
+    }
+}
+
 /// Collect all pages into a single result
 pub async fn collect_all_pages<P>(
     paginator: P,

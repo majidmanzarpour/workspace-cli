@@ -5,7 +5,14 @@ edition = "2021"
 description = "High-performance Google Workspace CLI for AI agent integration"
 license = "MIT"
 
+[features]
+default = []
+mcp = ["dep:rmcp"]
+
 [dependencies]
+# MCP server (optional)
+rmcp = { version = "1.1", features = ["server", "transport-io"], optional = true }
+
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"

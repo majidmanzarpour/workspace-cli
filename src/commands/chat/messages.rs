@@ -2,6 +2,7 @@ use crate::client::ApiClient;
 use crate::error::Result;
 use super::types::{Message, MessageListResponse, CreateMessageRequest, Thread};
 
+#[derive(Clone)]
 pub struct ListMessagesParams {
     pub space_name: String,
     pub page_size: u32,

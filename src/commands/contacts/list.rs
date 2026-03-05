@@ -2,6 +2,7 @@ use crate::client::ApiClient;
 use crate::error::Result;
 use super::types::{ConnectionsResponse, Person, READ_MASK};
 
+#[derive(Clone)]
 pub struct ListContactsParams {
     pub page_size: u32,
     pub page_token: Option<String>,

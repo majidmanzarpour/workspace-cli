@@ -5,6 +5,7 @@ use workspace_cli::Config;
 use workspace_cli::auth::TokenManager;
 use workspace_cli::client::ApiClient;
 use workspace_cli::output::{Formatter, OutputFormat};
+use workspace_cli::output::pagination::PageConfig;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -40,6 +41,22 @@ struct Cli {
     /// Impersonate user via domain-wide delegation (requires service account)
     #[arg(long = "as", global = true, value_name = "EMAIL")]
     impersonate: Option<String>,
+
+    /// Fetch all pages automatically (streams items one by one)
+    #[arg(long, global = true)]
+    page_all: bool,
+
+    /// Maximum pages to fetch when --page-all is active (default: 10; 0 = unlimited)
+    #[arg(long, global = true, default_value = "10")]
+    page_limit: u32,
+
+    /// Delay in milliseconds between page requests when paginating (default: 100)
+    #[arg(long, global = true, default_value = "100")]
+    page_delay: u64,
+
+    /// Preview API request without executing it (prints request details and exits)
+    #[arg(long, global = true)]
+    dry_run: bool,
 }
 
 #[derive(Subcommand)]
@@ -248,6 +265,9 @@ enum Commands {
         #[command(subcommand)]
         command: AdminCommands,
     },
+    /// Start MCP (Model Context Protocol) server over stdio
+    #[cfg(feature = "mcp")]
+    Mcp,
 }
 
 #[derive(Debug, Subcommand)]
@@ -802,6 +822,15 @@ enum AuthCommands {
     Logout,
     /// Show current authentication status
     Status,
+    /// Export stored credentials for headless/CI use
+    Export {
+        /// Show full unmasked access token (default: masked)
+        #[arg(long)]
+        unmasked: bool,
+        /// Write output to file instead of stdout
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1136,6 +1165,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             BatchCommands::Calendar { .. } => "calendar",
         },
         Commands::Auth { .. } => "gmail", // auth doesn't make API calls, scope is irrelevant
+        #[cfg(feature = "mcp")]
+        Commands::Mcp => "gmail",
     };
     tm.set_service(service_name);
 
@@ -1150,6 +1181,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     });
     let quiet = cli.quiet;
 
+    let page_cfg = PageConfig {
+        page_all: cli.page_all,
+        page_limit: cli.page_limit,
+        page_delay: cli.page_delay,
+    };
+
     // Route commands
     match cli.command {
         Commands::Gmail { command } => {
@@ -1162,12 +1199,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::gmail(token_manager.clone());
+            let client = ApiClient::gmail(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
                 GmailCommands::List { query, limit, label } => {
-                    let params = workspace_cli::commands::gmail::list::ListParams {
+                    let mut params = workspace_cli::commands::gmail::list::ListParams {
                         query,
                         max_results: limit,
                         label_ids: label.map(|l| vec![l]),
@@ -1181,19 +1218,52 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             std::process::exit(1);
                         }).unwrap()
                     };
-                    match workspace_cli::commands::gmail::list::list_messages_with_metadata(&client, params, &access_token).await {
-                        Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&response)?;
-                            } else {
-                                formatter.write(&response)?;
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::gmail::list::list_messages_with_metadata(&client, params.clone(), &access_token).await {
+                                Ok(response) => {
+                                    for msg in &response.messages {
+                                        active_formatter.stream_item(msg)?;
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
+                                }
+                                Err(e) => {
+                                    eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                    std::process::exit(1);
+                                }
                             }
                         }
-                        Err(e) => {
-                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
-                            std::process::exit(1);
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::gmail::list::list_messages_with_metadata(&client, params, &access_token).await {
+                            Ok(response) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response)?;
+                                } else {
+                                    formatter.write(&response)?;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
@@ -1543,7 +1613,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::drive(token_manager.clone());
+            let client = ApiClient::drive(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -1556,7 +1626,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         (None, None) => None,
                     };
 
-                    let params = workspace_cli::commands::drive::list::ListParams {
+                    let mut params = workspace_cli::commands::drive::list::ListParams {
                         query: final_query,
                         max_results: limit,
                         page_token,
@@ -1565,19 +1635,52 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         corpora,
                         include_permissions,
                     };
-                    match workspace_cli::commands::drive::list::list_files(&client, params).await {
-                        Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&response)?;
-                            } else {
-                                formatter.write(&response)?;
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::drive::list::list_files(&client, params.clone()).await {
+                                Ok(response) => {
+                                    for f in &response.files {
+                                        active_formatter.stream_item(f)?;
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
+                                }
+                                Err(e) => {
+                                    eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                    std::process::exit(1);
+                                }
                             }
                         }
-                        Err(e) => {
-                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
-                            std::process::exit(1);
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::drive::list::list_files(&client, params).await {
+                            Ok(response) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response)?;
+                                } else {
+                                    formatter.write(&response)?;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
@@ -1874,12 +1977,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::calendar(token_manager.clone());
+            let client = ApiClient::calendar(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
                 CalendarCommands::List { calendar, time_min, time_max, limit, sync_token, full } => {
-                    let params = workspace_cli::commands::calendar::list::ListEventsParams {
+                    let mut params = workspace_cli::commands::calendar::list::ListEventsParams {
                         calendar_id: calendar,
                         time_min,
                         time_max,
@@ -1889,32 +1992,72 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         sync_token,
                         page_token: None,
                     };
-                    match workspace_cli::commands::calendar::list::list_events(&client, params).await {
-                        Ok(response) => {
-                            if full {
-                                // Return full event data
-                                if let Some(ref output_path) = cli.output {
-                                    let file = std::fs::File::create(output_path)?;
-                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                    file_formatter.write(&response)?;
-                                } else {
-                                    formatter.write(&response)?;
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::calendar::list::list_events(&client, params.clone()).await {
+                                Ok(response) => {
+                                    if full {
+                                        for event in &response.items {
+                                            active_formatter.stream_item(event)?;
+                                        }
+                                    } else {
+                                        for event in &response.items {
+                                            let minimal = workspace_cli::commands::calendar::types::MinimalEvent::from_event(event);
+                                            active_formatter.stream_item(&minimal)?;
+                                        }
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
                                 }
-                            } else {
-                                // Default: minimal event data (id, summary, start, end, status)
-                                let minimal = workspace_cli::commands::calendar::types::MinimalEventList::from_event_list(&response);
-                                if let Some(ref output_path) = cli.output {
-                                    let file = std::fs::File::create(output_path)?;
-                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                    file_formatter.write(&minimal)?;
-                                } else {
-                                    formatter.write(&minimal)?;
+                                Err(e) => {
+                                    eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                    std::process::exit(1);
                                 }
                             }
                         }
-                        Err(e) => {
-                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
-                            std::process::exit(1);
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::calendar::list::list_events(&client, params).await {
+                            Ok(response) => {
+                                if full {
+                                    // Return full event data
+                                    if let Some(ref output_path) = cli.output {
+                                        let file = std::fs::File::create(output_path)?;
+                                        let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                        file_formatter.write(&response)?;
+                                    } else {
+                                        formatter.write(&response)?;
+                                    }
+                                } else {
+                                    // Default: minimal event data (id, summary, start, end, status)
+                                    let minimal = workspace_cli::commands::calendar::types::MinimalEventList::from_event_list(&response);
+                                    if let Some(ref output_path) = cli.output {
+                                        let file = std::fs::File::create(output_path)?;
+                                        let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                        file_formatter.write(&minimal)?;
+                                    } else {
+                                        formatter.write(&minimal)?;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
@@ -1999,7 +2142,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::docs(token_manager.clone());
+            let client = ApiClient::docs(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -2118,7 +2261,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::sheets(token_manager.clone());
+            let client = ApiClient::sheets(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -2309,7 +2452,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::slides(token_manager.clone());
+            let client = ApiClient::slides(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -2389,7 +2532,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::tasks(token_manager.clone());
+            let client = ApiClient::tasks(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -2411,39 +2554,79 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 TasksCommands::List { list, limit, show_completed, full } => {
-                    let params = workspace_cli::commands::tasks::list::ListTasksParams {
+                    let mut params = workspace_cli::commands::tasks::list::ListTasksParams {
                         task_list_id: list,
                         max_results: limit.min(100),  // API max is 100
                         show_completed,
                         show_hidden: false,
                         page_token: None,
                     };
-                    match workspace_cli::commands::tasks::list::list_tasks(&client, params).await {
-                        Ok(response) => {
-                            if full {
-                                // Return full task data
-                                if let Some(ref output_path) = cli.output {
-                                    let file = std::fs::File::create(output_path)?;
-                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                    file_formatter.write(&response)?;
-                                } else {
-                                    formatter.write(&response)?;
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::tasks::list::list_tasks(&client, params.clone()).await {
+                                Ok(response) => {
+                                    if full {
+                                        for task in &response.items {
+                                            active_formatter.stream_item(task)?;
+                                        }
+                                    } else {
+                                        for task in &response.items {
+                                            let minimal = workspace_cli::commands::tasks::types::MinimalTask::from_task(task);
+                                            active_formatter.stream_item(&minimal)?;
+                                        }
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
                                 }
-                            } else {
-                                // Default: minimal task data (id, title, status, due, notes, completed)
-                                let minimal = workspace_cli::commands::tasks::types::MinimalTasks::from_tasks(&response);
-                                if let Some(ref output_path) = cli.output {
-                                    let file = std::fs::File::create(output_path)?;
-                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                    file_formatter.write(&minimal)?;
-                                } else {
-                                    formatter.write(&minimal)?;
+                                Err(e) => {
+                                    eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                    std::process::exit(1);
                                 }
                             }
                         }
-                        Err(e) => {
-                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
-                            std::process::exit(1);
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::tasks::list::list_tasks(&client, params).await {
+                            Ok(response) => {
+                                if full {
+                                    // Return full task data
+                                    if let Some(ref output_path) = cli.output {
+                                        let file = std::fs::File::create(output_path)?;
+                                        let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                        file_formatter.write(&response)?;
+                                    } else {
+                                        formatter.write(&response)?;
+                                    }
+                                } else {
+                                    // Default: minimal task data (id, title, status, due, notes, completed)
+                                    let minimal = workspace_cli::commands::tasks::types::MinimalTasks::from_tasks(&response);
+                                    if let Some(ref output_path) = cli.output {
+                                        let file = std::fs::File::create(output_path)?;
+                                        let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                        file_formatter.write(&minimal)?;
+                                    } else {
+                                        formatter.write(&minimal)?;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
@@ -2560,6 +2743,62 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         println!("{}", serde_json::to_string_pretty(&status).unwrap());
                     }
                 }
+                AuthCommands::Export { unmasked, output } => {
+                    use workspace_cli::auth::keyring_storage::TokenStorage;
+                    let storage = TokenStorage::new("default");
+                    let stored = match storage.retrieve() {
+                        Ok(t) => t,
+                        Err(_) => {
+                            eprintln!(r#"{{"status":"error","message":"No credentials found. Run 'workspace-cli auth login' first."}}"#);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Get token cache path from TokenManager status
+                    let cache_path = {
+                        let tm = token_manager.read().await;
+                        tm.status().token_cache_path.to_string_lossy().to_string()
+                    };
+
+                    // Mask or reveal the access token
+                    let token_len = stored.access_token.len();
+                    let (token_display, env_value) = if unmasked {
+                        (stored.access_token.clone(), stored.access_token.clone())
+                    } else {
+                        let prefix_len = std::cmp::min(8, token_len);
+                        let masked = format!("{}...[use --unmasked to reveal]", &stored.access_token[..prefix_len]);
+                        (masked, "[run with --unmasked to get full token]".to_string())
+                    };
+
+                    // Format expiry as human-readable
+                    let expires_display = stored.expires_at.map(|ts| {
+                        chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+                            .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                            .unwrap_or_else(|| ts.to_string())
+                    });
+
+                    let result = serde_json::json!({
+                        "status": "ok",
+                        "storage_type": storage.storage_type(),
+                        "token_cache_path": cache_path,
+                        "access_token": token_display,
+                        "expires_at": expires_display,
+                        "setup": {
+                            "note": "Access tokens expire in ~1 hour. For long-running CI, copy the token_cache_path file instead.",
+                            "env_command": format!("export WORKSPACE_ACCESS_TOKEN={}", env_value)
+                        }
+                    });
+
+                    let json_out = serde_json::to_string_pretty(&result).unwrap();
+                    if let Some(path) = output {
+                        std::fs::write(&path, &json_out)?;
+                        if !quiet {
+                            eprintln!("Credentials exported to {}", path);
+                        }
+                    } else {
+                        println!("{}", json_out);
+                    }
+                }
             }
         }
         Commands::Batch { command } => {
@@ -2646,7 +2885,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::chat(token_manager.clone());
+            let client = ApiClient::chat(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -2658,18 +2897,48 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                         None => None,
                     };
-                    let params = workspace_cli::commands::chat::spaces::ListSpacesParams {
+                    let mut params = workspace_cli::commands::chat::spaces::ListSpacesParams {
                         page_size: limit, page_token: None, filter,
                     };
-                    match workspace_cli::commands::chat::spaces::list_spaces(&client, params).await {
-                        Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                ff.write(&response)?;
-                            } else { formatter.write(&response)?; }
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::chat::spaces::list_spaces(&client, params.clone()).await {
+                                Ok(response) => {
+                                    for space in &response.spaces {
+                                        active_formatter.stream_item(space)?;
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
+                                }
+                                Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                            }
                         }
-                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::chat::spaces::list_spaces(&client, params).await {
+                            Ok(response) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&response)?;
+                                } else { formatter.write(&response)?; }
+                            }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        }
                     }
                 }
                 ChatCommands::SpacesFind { name } => {
@@ -2721,56 +2990,86 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         filter_parts.push(format!("createTime < \"{}\"", t));
                     }
                     let filter = if filter_parts.is_empty() { None } else { Some(filter_parts.join(" AND ")) };
-                    let params = workspace_cli::commands::chat::messages::ListMessagesParams {
+                    let mut params = workspace_cli::commands::chat::messages::ListMessagesParams {
                         space_name: space,
                         page_size: limit,
                         page_token: None,
                         order_by: Some(order_by),
                         filter,
                     };
-                    match workspace_cli::commands::chat::messages::list_messages(&client, params).await {
-                        Ok(mut response) => {
-                            // Resolve sender displayNames via Admin Directory API
-                            let user_ids: std::collections::HashSet<String> = response.messages.iter()
-                                .filter_map(|m| m.sender.as_ref())
-                                .filter(|s| s.display_name.is_none())
-                                .filter_map(|s| s.name.as_ref())
-                                .filter(|n| n.starts_with("users/"))
-                                .map(|n| n.strip_prefix("users/").unwrap().to_string())
-                                .collect();
-                            if !user_ids.is_empty() {
-                                let admin_client = ApiClient::admin(token_manager.clone());
-                                let mut name_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-                                for uid in &user_ids {
-                                    if let Ok(user) = workspace_cli::commands::admin::users::get_user(&admin_client, uid).await {
-                                        if let Some(uname) = user.name {
-                                            if let Some(full) = uname.full_name {
-                                                name_map.insert(uid.clone(), full);
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::chat::messages::list_messages(&client, params.clone()).await {
+                                Ok(response) => {
+                                    for msg in &response.messages {
+                                        active_formatter.stream_item(msg)?;
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
+                                }
+                                Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                            }
+                        }
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::chat::messages::list_messages(&client, params).await {
+                            Ok(mut response) => {
+                                // Resolve sender displayNames via Admin Directory API
+                                let user_ids: std::collections::HashSet<String> = response.messages.iter()
+                                    .filter_map(|m| m.sender.as_ref())
+                                    .filter(|s| s.display_name.is_none())
+                                    .filter_map(|s| s.name.as_ref())
+                                    .filter(|n| n.starts_with("users/"))
+                                    .map(|n| n.strip_prefix("users/").unwrap().to_string())
+                                    .collect();
+                                if !user_ids.is_empty() {
+                                    let admin_client = ApiClient::admin(token_manager.clone()).with_dry_run(cli.dry_run);
+                                    let mut name_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                                    for uid in &user_ids {
+                                        if let Ok(user) = workspace_cli::commands::admin::users::get_user(&admin_client, uid).await {
+                                            if let Some(uname) = user.name {
+                                                if let Some(full) = uname.full_name {
+                                                    name_map.insert(uid.clone(), full);
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                for msg in &mut response.messages {
-                                    if let Some(ref mut sender) = msg.sender {
-                                        if sender.display_name.is_none() {
-                                            if let Some(ref name) = sender.name {
-                                                if let Some(uid) = name.strip_prefix("users/") {
-                                                    if let Some(resolved) = name_map.get(uid) {
-                                                        sender.display_name = Some(resolved.clone());
+                                    for msg in &mut response.messages {
+                                        if let Some(ref mut sender) = msg.sender {
+                                            if sender.display_name.is_none() {
+                                                if let Some(ref name) = sender.name {
+                                                    if let Some(uid) = name.strip_prefix("users/") {
+                                                        if let Some(resolved) = name_map.get(uid) {
+                                                            sender.display_name = Some(resolved.clone());
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&response)?;
+                                } else { formatter.write(&response)?; }
                             }
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                ff.write(&response)?;
-                            } else { formatter.write(&response)?; }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                         }
-                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
                     }
                 }
                 ChatCommands::ReadState { space } => {
@@ -2895,23 +3194,53 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::contacts(token_manager.clone());
+            let client = ApiClient::contacts(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
                 ContactsCommands::List { limit } => {
-                    let params = workspace_cli::commands::contacts::list::ListContactsParams {
+                    let mut params = workspace_cli::commands::contacts::list::ListContactsParams {
                         page_size: limit, page_token: None,
                     };
-                    match workspace_cli::commands::contacts::list::list_contacts(&client, params).await {
-                        Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                ff.write(&response)?;
-                            } else { formatter.write(&response)?; }
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::contacts::list::list_contacts(&client, params.clone()).await {
+                                Ok(response) => {
+                                    for person in &response.connections {
+                                        active_formatter.stream_item(person)?;
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
+                                }
+                                Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                            }
                         }
-                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::contacts::list::list_contacts(&client, params).await {
+                            Ok(response) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&response)?;
+                                } else { formatter.write(&response)?; }
+                            }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        }
                     }
                 }
                 ContactsCommands::Search { query, limit } => {
@@ -2965,18 +3294,48 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 ContactsCommands::DirectoryList { limit } => {
-                    let params = workspace_cli::commands::contacts::search::DirectoryListParams {
+                    let mut params = workspace_cli::commands::contacts::search::DirectoryListParams {
                         page_size: limit, page_token: None,
                     };
-                    match workspace_cli::commands::contacts::search::list_directory(&client, params).await {
-                        Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                ff.write(&response)?;
-                            } else { formatter.write(&response)?; }
+
+                    if page_cfg.is_enabled() {
+                        let mut active_formatter = if let Some(ref output_path) = cli.output {
+                            let file = std::fs::File::create(output_path)?;
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file)
+                        } else {
+                            Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet)
+                        };
+                        active_formatter.start_stream()?;
+                        let mut page_num = 0u32;
+                        loop {
+                            match workspace_cli::commands::contacts::search::list_directory(&client, params.clone()).await {
+                                Ok(response) => {
+                                    for person in &response.people {
+                                        active_formatter.stream_item(person)?;
+                                    }
+                                    page_num += 1;
+                                    let next_token = response.next_page_token.clone();
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                        break;
+                                    }
+                                    page_cfg.delay().await;
+                                    params.page_token = next_token;
+                                }
+                                Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                            }
                         }
-                        Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        active_formatter.end_stream()?;
+                    } else {
+                        match workspace_cli::commands::contacts::search::list_directory(&client, params).await {
+                            Ok(response) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut ff = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    ff.write(&response)?;
+                                } else { formatter.write(&response)?; }
+                            }
+                            Err(e) => { eprintln!(r#"{{"status":"error","message":"{}"}}"#, e); std::process::exit(1); }
+                        }
                     }
                 }
                 ContactsCommands::DirectorySearch { query, limit } => {
@@ -3003,7 +3362,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::groups(token_manager.clone());
+            let client = ApiClient::groups(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -3012,7 +3371,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!(r#"{{"status":"error","message":"Either --email or --domain is required"}}"#);
                         std::process::exit(1);
                     }
-                    let admin_client = ApiClient::admin(token_manager.clone());
+                    let admin_client = ApiClient::admin(token_manager.clone()).with_dry_run(cli.dry_run);
                     let params = workspace_cli::commands::groups::list::ListGroupsParams {
                         email, domain, page_size: limit, page_token: None,
                     };
@@ -3050,7 +3409,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let client = ApiClient::admin(token_manager.clone());
+            let client = ApiClient::admin(token_manager.clone()).with_dry_run(cli.dry_run);
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
@@ -3082,7 +3441,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 AdminCommands::ReportsDriveActivity { event_name, start_time, end_time, filters, max_results } => {
-                    let reports_client = ApiClient::admin_reports(token_manager.clone());
+                    let reports_client = ApiClient::admin_reports(token_manager.clone()).with_dry_run(cli.dry_run);
                     let params = workspace_cli::commands::admin::reports::DriveActivityParams {
                         event_name, start_time, end_time, filters, max_results,
                     };
@@ -3099,6 +3458,18 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+        }
+        #[cfg(feature = "mcp")]
+        Commands::Mcp => {
+            {
+                let mut tm = token_manager.write().await;
+                if let Err(e) = tm.ensure_authenticated().await {
+                    eprintln!(r#"{{"status":"error","message":"Not authenticated: {}. Run 'workspace-cli auth login' first."}}"#, e);
+                    std::process::exit(1);
+                }
+            }
+            eprintln!("workspace-cli MCP server starting (stdio)...");
+            workspace_cli::mcp::run(token_manager.clone()).await;
         }
     }
 

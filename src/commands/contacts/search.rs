@@ -11,6 +11,7 @@ pub async fn search_contacts(client: &ApiClient, query: &str, page_size: u32) ->
     client.get_with_query("/people:searchContacts", &query_params).await
 }
 
+#[derive(Clone)]
 pub struct DirectoryListParams {
     pub page_size: u32,
     pub page_token: Option<String>,

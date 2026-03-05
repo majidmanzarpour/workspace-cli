@@ -2,6 +2,7 @@ use crate::client::ApiClient;
 use crate::error::Result;
 use super::types::{TaskLists, Tasks, Task};
 
+#[derive(Clone)]
 pub struct ListTasksParams {
     pub task_list_id: String,
     pub max_results: u32,

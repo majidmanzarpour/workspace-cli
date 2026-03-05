@@ -3,6 +3,7 @@ use crate::client::batch::{BatchClient, BatchRequest};
 use crate::error::Result;
 use super::types::{ListMessagesResponse, MessageRef, MessageSummary, EnrichedListResponse};
 
+#[derive(Clone)]
 pub struct ListParams {
     pub query: Option<String>,
     pub max_results: u32,

@@ -6,6 +6,7 @@ pub mod error;
 pub mod output;
 pub mod utils;
 pub mod cli;
+pub mod mcp;
 
 pub use config::Config;
 pub use error::{CliError, ErrorCode, Result, WorkspaceError};

@@ -24,10 +24,127 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 - **Structured Output**: All responses in TOON (default, token-efficient), JSON, JSONL, or CSV formats
 - **Field Masking**: Reduce token costs by selecting only needed fields
+- **Auto-Pagination**: Fetch all pages automatically with `--page-all`, `--page-limit`, and `--page-delay`
+- **Dry Run**: Preview any API request before executing it with `--dry-run`
+- **Auth Export**: Export stored credentials for use in scripts or CI with `auth export`
+- **MCP Server**: Built-in Model Context Protocol server exposing ~50 tools for AI agents (`workspace-cli mcp`)
 - **Rate Limiting**: Built-in retry logic with exponential backoff
 - **Streaming**: JSONL output for real-time processing of paginated results
 - **Secure Auth**: OS keyring integration for token storage
 - **Error Handling**: Structured, actionable error messages with retry guidance
+
+## Pagination
+
+All list commands support automatic multi-page fetching:
+
+```bash
+# Fetch all pages automatically (streams items as they arrive)
+workspace-cli gmail list --query "is:unread" --page-all
+
+# Limit to first 3 pages
+workspace-cli drive list --page-all --page-limit 3
+
+# Add delay between pages to avoid rate limits
+workspace-cli calendar list --time-min "2026-01-01T00:00:00Z" --page-all --page-delay 200
+
+# --page-limit 0 = unlimited (same as --page-all)
+workspace-cli contacts list --page-limit 0
+```
+
+Global pagination flags (work with any list command):
+- `--page-all` — fetch all pages (overrides `--page-limit`)
+- `--page-limit N` — max pages to fetch (default: 10; 0 = unlimited)
+- `--page-delay N` — milliseconds between page requests (default: 100)
+
+---
+
+## Dry Run
+
+Preview any API request before executing it:
+
+```bash
+workspace-cli gmail send --to test@example.com --subject "Test" --body "Hello" --dry-run
+workspace-cli drive list --query "name='test'" --dry-run
+workspace-cli calendar create --summary "Meeting" --start "2026-03-10T14:00:00Z" --end "2026-03-10T15:00:00Z" --dry-run
+```
+
+Output:
+```json
+{
+  "dry_run": true,
+  "method": "POST",
+  "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+  "body": { },
+  "auth": "Bearer [REDACTED]"
+}
+```
+
+The `--dry-run` flag works globally with any command that makes API calls.
+
+---
+
+## Auth Export
+
+Export stored credentials for use in scripts or CI:
+
+```bash
+# Show token info (masked by default)
+workspace-cli auth export
+
+# Show full unmasked token
+workspace-cli auth export --unmasked
+
+# Write to file
+workspace-cli auth export --output /tmp/creds.json
+```
+
+Note: Access tokens expire in ~1 hour. For long-running processes, copy the `token_cache_path` file instead.
+
+---
+
+## MCP Server
+
+workspace-cli includes a built-in MCP (Model Context Protocol) server that exposes all Google Workspace operations as tools for AI agents.
+
+```bash
+# Start the MCP server (stdio transport)
+workspace-cli mcp
+```
+
+The MCP server exposes ~50 tools covering all services:
+
+| Service | Tools |
+|---------|-------|
+| Gmail | gmail_list, gmail_get, gmail_send, gmail_reply, gmail_labels, gmail_modify, gmail_trash, gmail_delete |
+| Drive | drive_list, drive_get, drive_mkdir, drive_move, drive_copy, drive_rename, drive_share, drive_permissions, drive_trash, drive_delete |
+| Calendar | calendar_list, calendar_create, calendar_update, calendar_delete |
+| Docs | docs_get, docs_create, docs_append, docs_replace, docs_batch_update |
+| Sheets | sheets_get, sheets_create, sheets_update, sheets_append, sheets_clear, sheets_list_sheets |
+| Slides | slides_get, slides_page |
+| Tasks | tasks_lists, tasks_list, tasks_create, tasks_update, tasks_delete |
+| Chat | chat_spaces_list, chat_find_dm, chat_messages_list, chat_send, chat_unread, chat_mark_read |
+| Contacts | contacts_list, contacts_search, contacts_get, contacts_create, contacts_delete, contacts_directory_list, contacts_directory_search |
+
+**Building with MCP support:**
+```bash
+cargo build --release --features mcp
+```
+
+**Using with Claude Desktop or other MCP clients:**
+```json
+{
+  "mcpServers": {
+    "workspace": {
+      "command": "workspace-cli",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The MCP binary is built with `--features mcp`. The standard binary (without `--features mcp`) does not include the MCP server to keep binary size minimal.
+
+---
 
 ## Installation
 
@@ -44,6 +161,9 @@ cd workspace-cli
 
 # Build release binary
 cargo build --release
+
+# Build with MCP server support
+cargo build --release --features mcp
 
 # Install to system path
 cp target/release/workspace-cli /usr/local/bin/
@@ -737,6 +857,13 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `auth login` | Login with OAuth2 | `--credentials` |
 | `auth logout` | Logout and clear tokens | None |
 | `auth status` | Show authentication status | None |
+| `auth export` | Export stored credentials | `--unmasked`, `--output` |
+
+### MCP Commands
+
+| Command | Description | Key Options |
+|---------|-------------|-------------|
+| `mcp` | Start stdio MCP server (~50 tools) | None |
 
 ## Environment Variables
 
@@ -1011,7 +1138,10 @@ For issues, questions, or contributions:
 - [x] ~~Extended field filtering~~ (`--fields` flag for JSON field selection)
 - [x] ~~Batch operations for bulk processing~~ (`batch gmail/drive/calendar` commands)
 - [x] ~~Google Docs batchUpdate support~~ (`docs batch-update` for rich document formatting)
-- [ ] Model Context Protocol (MCP) server mode
+- [x] Auto-pagination (`--page-all`, `--page-limit`, `--page-delay`)
+- [x] Dry-run mode (`--dry-run`)
+- [x] Auth export (`auth export --unmasked`)
+- [x] MCP server (`workspace-cli mcp`, ~50 tools)
 - [ ] Webhook support for real-time notifications
 - [ ] Performance benchmarks and optimizations
 

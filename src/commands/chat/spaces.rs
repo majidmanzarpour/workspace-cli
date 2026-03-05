@@ -2,6 +2,7 @@ use crate::client::ApiClient;
 use crate::error::Result;
 use super::types::{Space, SpaceListResponse, SetupSpaceRequest, SpaceSetup, MembershipSetup, MemberRef};
 
+#[derive(Clone)]
 pub struct ListSpacesParams {
     pub page_size: u32,
     pub page_token: Option<String>,

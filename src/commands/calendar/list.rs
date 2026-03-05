@@ -2,6 +2,7 @@ use crate::client::ApiClient;
 use crate::error::Result;
 use super::types::{EventList, CalendarList};
 
+#[derive(Clone)]
 pub struct ListEventsParams {
     pub calendar_id: String,
     pub time_min: Option<String>,

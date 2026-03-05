@@ -2,6 +2,7 @@ use crate::client::ApiClient;
 use crate::error::Result;
 use super::types::{File, FileList, SharedDriveList};
 
+#[derive(Clone)]
 pub struct ListParams {
     pub query: Option<String>,
     pub max_results: u32,
