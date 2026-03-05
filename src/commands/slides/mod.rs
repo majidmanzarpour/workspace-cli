@@ -1,5 +1,8 @@
 pub mod types;
 pub mod get;
+pub mod create;
+pub mod update;
+pub mod batch_types;
 
 // Re-export commonly used types
 pub use types::{

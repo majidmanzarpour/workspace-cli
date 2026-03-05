@@ -751,6 +751,136 @@ enum SlidesCommands {
         #[arg(long)]
         full: bool,
     },
+    /// Create a new presentation
+    Create {
+        /// Presentation title
+        title: String,
+    },
+    /// Add a slide to a presentation
+    AddSlide {
+        /// Presentation ID
+        id: String,
+        /// Insertion index (omit to append)
+        #[arg(long)]
+        index: Option<u32>,
+        /// Slide layout (BLANK, TITLE, TITLE_AND_BODY, TITLE_AND_TWO_COLUMNS, etc.)
+        #[arg(long, default_value = "BLANK")]
+        layout: String,
+        /// Custom object ID for the new slide (auto-generated if omitted)
+        #[arg(long)]
+        object_id: Option<String>,
+    },
+    /// Add a shape to a slide
+    AddShape {
+        /// Presentation ID
+        id: String,
+        /// Slide object ID to place the shape on
+        #[arg(long)]
+        slide: String,
+        /// Shape type (RECTANGLE, TEXT_BOX, ELLIPSE, ROUNDED_RECTANGLE, etc.)
+        #[arg(long, default_value = "RECTANGLE")]
+        r#type: String,
+        /// Text to insert into the shape
+        #[arg(long)]
+        text: Option<String>,
+        /// X position in points
+        #[arg(long, default_value = "100")]
+        x: f64,
+        /// Y position in points
+        #[arg(long, default_value = "100")]
+        y: f64,
+        /// Width in points
+        #[arg(long, default_value = "300")]
+        width: f64,
+        /// Height in points
+        #[arg(long, default_value = "80")]
+        height: f64,
+        /// Fill color as hex (e.g. "#3366CC")
+        #[arg(long)]
+        fill: Option<String>,
+        /// Font size in points
+        #[arg(long)]
+        font_size: Option<f64>,
+        /// Make text bold
+        #[arg(long)]
+        bold: bool,
+        /// Custom object ID (auto-generated if omitted)
+        #[arg(long)]
+        object_id: Option<String>,
+    },
+    /// Add a table to a slide
+    AddTable {
+        /// Presentation ID
+        id: String,
+        /// Slide object ID
+        #[arg(long)]
+        slide: String,
+        /// Number of rows
+        #[arg(long)]
+        rows: u32,
+        /// Number of columns
+        #[arg(long)]
+        cols: u32,
+        /// Cell data as JSON 2D array (e.g. '[["A","B"],["1","2"]]')
+        #[arg(long)]
+        data: Option<String>,
+        /// Header row fill color as hex (e.g. "#333333")
+        #[arg(long)]
+        header_color: Option<String>,
+        /// Custom object ID (auto-generated if omitted)
+        #[arg(long)]
+        object_id: Option<String>,
+    },
+    /// Embed a Google Sheets chart on a slide
+    AddChart {
+        /// Presentation ID
+        id: String,
+        /// Slide object ID
+        #[arg(long)]
+        slide: String,
+        /// Source spreadsheet ID
+        #[arg(long)]
+        spreadsheet: String,
+        /// Chart ID from the spreadsheet
+        #[arg(long)]
+        chart_id: u64,
+        /// Keep chart linked to source data (auto-updates)
+        #[arg(long)]
+        linked: bool,
+        /// X position in points
+        #[arg(long, default_value = "50")]
+        x: f64,
+        /// Y position in points
+        #[arg(long, default_value = "50")]
+        y: f64,
+        /// Width in points
+        #[arg(long, default_value = "400")]
+        width: f64,
+        /// Height in points
+        #[arg(long, default_value = "300")]
+        height: f64,
+        /// Custom object ID (auto-generated if omitted)
+        #[arg(long)]
+        object_id: Option<String>,
+    },
+    /// Delete a slide or page element
+    Delete {
+        /// Presentation ID
+        id: String,
+        /// Object ID of the slide or element to delete
+        object_id: String,
+    },
+    /// Raw batchUpdate passthrough
+    BatchUpdate {
+        /// Presentation ID
+        id: String,
+        /// JSON array of request objects
+        #[arg(long, conflicts_with = "file")]
+        requests: Option<String>,
+        /// Read requests from a JSON file
+        #[arg(long, conflicts_with = "requests")]
+        file: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2512,6 +2642,188 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     println!("{}", text);
                                 }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::Create { title } => {
+                    match workspace_cli::commands::slides::create::create_presentation(&client, &title).await {
+                        Ok(presentation) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "presentationId": presentation.presentation_id,
+                                "title": presentation.title,
+                                "slideCount": presentation.slides.len(),
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::AddSlide { id, index, layout, object_id } => {
+                    let oid = object_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    match workspace_cli::commands::slides::create::add_slide(&client, &id, &oid, index, &layout).await {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "slideObjectId": oid,
+                                "replies": response.replies,
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::AddShape { id, slide, r#type, text, x, y, width, height, fill, font_size, bold, object_id } => {
+                    let oid = object_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    match workspace_cli::commands::slides::update::add_shape(
+                        &client, &id, &oid, &slide, &r#type,
+                        x, y, width, height,
+                        text.as_deref(), fill.as_deref(), font_size, bold,
+                    ).await {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "objectId": oid,
+                                "replies": response.replies,
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::AddTable { id, slide, rows, cols, data, header_color, object_id } => {
+                    let oid = object_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    let parsed_data: Option<Vec<Vec<String>>> = match data {
+                        Some(ref json_str) => Some(serde_json::from_str(json_str).map_err(|e| {
+                            eprintln!(r#"{{"status":"error","message":"Invalid --data JSON: {}"}}"#, e);
+                            std::process::exit(1);
+                        }).unwrap()),
+                        None => None,
+                    };
+                    match workspace_cli::commands::slides::update::add_table(
+                        &client, &id, &oid, &slide, rows, cols,
+                        parsed_data.as_ref(), header_color.as_deref(),
+                    ).await {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "objectId": oid,
+                                "replies": response.replies,
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::AddChart { id, slide, spreadsheet, chart_id, linked, x, y, width, height, object_id } => {
+                    let oid = object_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    match workspace_cli::commands::slides::update::add_chart(
+                        &client, &id, &oid, &slide, &spreadsheet, chart_id, linked,
+                        x, y, width, height,
+                    ).await {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "objectId": oid,
+                                "replies": response.replies,
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::Delete { id, object_id } => {
+                    match workspace_cli::commands::slides::update::delete_object(&client, &id, &object_id).await {
+                        Ok(_response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "deleted": object_id,
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::BatchUpdate { id, requests, file } => {
+                    let json_str = if let Some(ref req) = requests {
+                        req.clone()
+                    } else if let Some(ref path) = file {
+                        std::fs::read_to_string(path)?
+                    } else {
+                        eprintln!(r#"{{"status":"error","message":"Provide --requests or --file"}}"#);
+                        std::process::exit(1);
+                    };
+                    let parsed: Vec<serde_json::Value> = serde_json::from_str(&json_str).map_err(|e| {
+                        eprintln!(r#"{{"status":"error","message":"Invalid JSON: {}"}}"#, e);
+                        std::process::exit(1);
+                    }).unwrap();
+                    match workspace_cli::commands::slides::update::batch_update(&client, &id, parsed).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
                             }
                         }
                         Err(e) => {
