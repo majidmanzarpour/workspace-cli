@@ -13,7 +13,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 - **Calendar**: List, create, update, and delete events with sync token support
 - **Docs**: Read documents as Markdown, append content, create documents, find/replace text, and apply rich formatting via batchUpdate (headings, bold, bullets)
 - **Sheets**: Read, write, append, create spreadsheets, and clear ranges
-- **Slides**: Get presentations, extract text, and access individual slides
+- **Slides**: Get presentations, extract text, create presentations, add slides/shapes/tables/charts, delete elements, and raw batchUpdate
 - **Chat**: List spaces, send messages, DMs, unread detection, mark-read (single + bulk), mute-aware filtering
 - **Contacts**: List, search, get, create, update, delete contacts, directory list/search
 - **Groups**: List group memberships, list group members
@@ -120,7 +120,7 @@ The MCP server exposes ~50 tools covering all services:
 | Calendar | calendar_list, calendar_create, calendar_update, calendar_delete |
 | Docs | docs_get, docs_create, docs_append, docs_replace, docs_batch_update |
 | Sheets | sheets_get, sheets_create, sheets_update, sheets_append, sheets_clear, sheets_list_sheets |
-| Slides | slides_get, slides_page |
+| Slides | slides_get, slides_page, slides_create, slides_add_slide, slides_add_shape, slides_add_table, slides_add_chart, slides_delete, slides_batch_update |
 | Tasks | tasks_lists, tasks_list, tasks_create, tasks_update, tasks_delete |
 | Chat | chat_spaces_list, chat_find_dm, chat_messages_list, chat_send, chat_unread, chat_mark_read |
 | Contacts | contacts_list, contacts_search, contacts_get, contacts_create, contacts_delete, contacts_directory_list, contacts_directory_search |
@@ -479,6 +479,41 @@ workspace-cli slides page <presentation-id> --page 0
 
 # Get specific page with full structure
 workspace-cli slides page <presentation-id> --page 0 --full
+
+# Create a new presentation
+workspace-cli slides create "Quarterly Review"
+
+# Add a slide (append by default, or specify index and layout)
+workspace-cli slides add-slide <presentation-id>
+workspace-cli slides add-slide <presentation-id> --index 1 --layout TITLE_AND_BODY
+
+# Add a shape with text and styling
+workspace-cli slides add-shape <presentation-id> --slide <slide-id> \
+  --type RECTANGLE --text "Hello World" \
+  --x 100 --y 50 --width 400 --height 80 \
+  --fill "#3366CC" --font-size 24 --bold
+
+# Add a text box
+workspace-cli slides add-shape <presentation-id> --slide <slide-id> \
+  --type TEXT_BOX --text "Some content" \
+  --x 50 --y 200 --width 600 --height 40
+
+# Add a table with data and header color
+workspace-cli slides add-table <presentation-id> --slide <slide-id> \
+  --rows 3 --cols 2 \
+  --data '[["Name","Role"],["Alice","Engineer"],["Bob","Designer"]]' \
+  --header-color "#333333"
+
+# Embed a Google Sheets chart (linked for auto-updates)
+workspace-cli slides add-chart <presentation-id> --slide <slide-id> \
+  --spreadsheet <spreadsheet-id> --chart-id 12345 --linked
+
+# Delete a slide or page element
+workspace-cli slides delete <presentation-id> <object-id>
+
+# Raw batchUpdate for advanced operations
+workspace-cli slides batch-update <presentation-id> \
+  --requests '[{"createSlide":{"slideLayoutReference":{"predefinedLayout":"BLANK"}}}]'
 ```
 
 ### Tasks Examples
@@ -797,6 +832,13 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 |---------|-------------|-------------|
 | `slides get` | Get presentation text | `--full` (text by default) |
 | `slides page` | Get specific page text | `--page`, `--full` |
+| `slides create` | Create a new presentation | None |
+| `slides add-slide` | Add a slide | `--index`, `--layout`, `--object-id` |
+| `slides add-shape` | Add a shape to a slide | `--slide`, `--type`, `--text`, `--x/y/width/height`, `--fill`, `--font-size`, `--bold` |
+| `slides add-table` | Add a table to a slide | `--slide`, `--rows`, `--cols`, `--data`, `--header-color` |
+| `slides add-chart` | Embed a Sheets chart | `--slide`, `--spreadsheet`, `--chart-id`, `--linked`, `--x/y/width/height` |
+| `slides delete` | Delete a slide or element | None |
+| `slides batch-update` | Raw batchUpdate passthrough | `--requests`, `--file` |
 
 ### Tasks Commands
 
@@ -1142,6 +1184,7 @@ For issues, questions, or contributions:
 - [x] Dry-run mode (`--dry-run`)
 - [x] Auth export (`auth export --unmasked`)
 - [x] MCP server (`workspace-cli mcp`, ~50 tools)
+- [x] Slides write support (create, shapes, tables, charts, delete, batchUpdate)
 - [ ] Webhook support for real-time notifications
 - [ ] Performance benchmarks and optimizations
 
