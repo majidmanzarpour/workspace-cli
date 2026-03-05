@@ -2744,45 +2744,39 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 AuthCommands::Export { unmasked, output } => {
-                    use workspace_cli::auth::keyring_storage::TokenStorage;
-                    let storage = TokenStorage::new("default");
-                    let stored = match storage.retrieve() {
-                        Ok(t) => t,
-                        Err(_) => {
-                            eprintln!(r#"{{"status":"error","message":"No credentials found. Run 'workspace-cli auth login' first."}}"#);
+                    // Use token_manager directly (tokens stored as JSON cache, not keyring)
+                    let (access_token, cache_path, storage_type) = {
+                        let mut tm = token_manager.write().await;
+                        if let Err(e) = tm.ensure_authenticated().await {
+                            eprintln!(r#"{{"status":"error","message":"Not authenticated: {}. Run 'workspace-cli auth login' first."}}"#, e);
                             std::process::exit(1);
                         }
-                    };
-
-                    // Get token cache path from TokenManager status
-                    let cache_path = {
-                        let tm = token_manager.read().await;
-                        tm.status().token_cache_path.to_string_lossy().to_string()
+                        let token = match tm.get_access_token().await {
+                            Ok(t) => t,
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
+                                std::process::exit(1);
+                            }
+                        };
+                        let status = tm.status();
+                        (token, status.token_cache_path.to_string_lossy().to_string(), status.storage_type.clone())
                     };
 
                     // Mask or reveal the access token
-                    let token_len = stored.access_token.len();
+                    let token_len = access_token.len();
                     let (token_display, env_value) = if unmasked {
-                        (stored.access_token.clone(), stored.access_token.clone())
+                        (access_token.clone(), access_token.clone())
                     } else {
                         let prefix_len = std::cmp::min(8, token_len);
-                        let masked = format!("{}...[use --unmasked to reveal]", &stored.access_token[..prefix_len]);
+                        let masked = format!("{}...[use --unmasked to reveal]", &access_token[..prefix_len]);
                         (masked, "[run with --unmasked to get full token]".to_string())
                     };
 
-                    // Format expiry as human-readable
-                    let expires_display = stored.expires_at.map(|ts| {
-                        chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
-                            .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-                            .unwrap_or_else(|| ts.to_string())
-                    });
-
                     let result = serde_json::json!({
                         "status": "ok",
-                        "storage_type": storage.storage_type(),
+                        "storage_type": storage_type,
                         "token_cache_path": cache_path,
                         "access_token": token_display,
-                        "expires_at": expires_display,
                         "setup": {
                             "note": "Access tokens expire in ~1 hour. For long-running CI, copy the token_cache_path file instead.",
                             "env_command": format!("export WORKSPACE_ACCESS_TOKEN={}", env_value)

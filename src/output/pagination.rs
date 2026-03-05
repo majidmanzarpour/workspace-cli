@@ -222,16 +222,19 @@ pub struct PageConfig {
 }
 
 impl PageConfig {
-    /// Returns true if pagination should continue after this page number (1-indexed)
+    /// Returns true if pagination should continue after this page number (1-indexed).
+    /// `page_limit == 0` means unlimited. `page_all` controls whether pagination is
+    /// enabled; `page_limit` caps how many pages are fetched.
     pub fn should_continue(&self, page_num: u32) -> bool {
-        if self.page_all { return true; }
-        if self.page_limit == 0 { return true; }
+        if self.page_limit == 0 { return true; }  // 0 = unlimited
         page_num < self.page_limit
     }
 
-    /// Returns true if auto-pagination is enabled at all
+    /// Returns true if auto-pagination is enabled at all.
+    /// Only `--page-all` enables pagination; `--page-limit` is a cap that only applies
+    /// when `--page-all` is set.
     pub fn is_enabled(&self) -> bool {
-        self.page_all || self.page_limit > 1
+        self.page_all
     }
 
     pub async fn delay(&self) {
