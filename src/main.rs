@@ -621,6 +621,17 @@ enum DocsCommands {
         #[arg(long)]
         match_case: bool,
     },
+    /// Send a batchUpdate request to a document
+    BatchUpdate {
+        /// Document ID
+        id: String,
+        /// JSON payload (inline)
+        #[arg(long)]
+        payload: Option<String>,
+        /// Path to JSON file containing the batchUpdate payload
+        #[arg(long)]
+        file: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2052,6 +2063,34 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 DocsCommands::Replace { id, find, replace_with, match_case } => {
                     match workspace_cli::commands::docs::update::replace_text(&client, &id, &find, &replace_with, match_case).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::BatchUpdate { id, payload, file } => {
+                    let json_str = if let Some(p) = payload {
+                        p
+                    } else if let Some(f) = file {
+                        std::fs::read_to_string(&f).map_err(|e| format!("Failed to read file: {}", e))?
+                    } else {
+                        eprintln!(r#"{{"status":"error","message":"Provide --payload or --file"}}"#);
+                        std::process::exit(1);
+                    };
+                    let body: serde_json::Value = serde_json::from_str(&json_str)
+                        .map_err(|e| format!("Invalid JSON: {}", e))?;
+                    let path = format!("/documents/{}:batchUpdate", id);
+                    match client.post::<serde_json::Value, serde_json::Value>(&path, &body).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
