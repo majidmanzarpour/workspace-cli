@@ -24,7 +24,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 - **Structured Output**: All responses in TOON (default, token-efficient), JSON, JSONL, or CSV formats
 - **Field Masking**: Reduce token costs by selecting only needed fields
-- **Auto-Pagination**: Fetch all pages automatically with `--page-all`, `--page-limit`, and `--page-delay`
+- **Auto-Pagination**: Fetch all pages with `--page-all`, control items with `--item-limit`, override page sizes, and date-aware early-stop
 - **Dry Run**: Preview any API request before executing it with `--dry-run`
 - **Auth Export**: Export stored credentials for use in scripts or CI with `auth export`
 - **MCP Server**: Built-in Model Context Protocol server exposing ~50 tools for AI agents (`workspace-cli mcp`)
@@ -35,7 +35,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 ## Pagination
 
-All list commands support automatic multi-page fetching:
+All list commands support automatic multi-page fetching with fine-grained control:
 
 ```bash
 # Fetch all pages automatically (streams items as they arrive)
@@ -47,14 +47,45 @@ workspace-cli drive list --page-all --page-limit 3
 # Add delay between pages to avoid rate limits
 workspace-cli calendar list --time-min "2026-01-01T00:00:00Z" --page-all --page-delay 200
 
-# --page-limit 0 = unlimited (same as --page-all)
-workspace-cli contacts list --page-limit 0
+# Cap at exactly 50 items across all pages
+workspace-cli drive list --page-all --page-limit 0 --item-limit 50
+
+# Override per-page size for efficiency (fetch 100 per request, stop at 250 total)
+workspace-cli chat spaces-list --page-all --page-size 100 --item-limit 250
+
+# Date-aware early stop — only files modified this week
+workspace-cli drive list --page-all --page-limit 0 --limit-by-date --date-after "2026-03-01T00:00:00Z"
+
+# Combine: 50 items per page, stop at 200 items or when older than Jan 1st
+workspace-cli gmail list --page-all --page-size 50 --item-limit 200 --limit-by-date --date-after "2026-01-01T00:00:00Z"
 ```
 
-Global pagination flags (work with any list command):
-- `--page-all` — fetch all pages (overrides `--page-limit`)
-- `--page-limit N` — max pages to fetch (default: 10; 0 = unlimited)
-- `--page-delay N` — milliseconds between page requests (default: 100)
+### Basic vs Enhanced Pagination
+
+| Scenario | Basic (before) | Enhanced (now) |
+|----------|---------------|----------------|
+| "Get exactly 150 emails" | `--page-all --page-limit 8` (guess: 8×20≈160) | `--page-all --item-limit 150` (exact) |
+| "Fetch large pages for speed" | Stuck with command default (10-20) | `--page-size 100` (override any command) |
+| "All Drive files from this month" | Fetch everything, filter client-side | `--limit-by-date --date-after "2026-03-01T00:00:00Z"` (stops early) |
+| "Recent chat messages only" | Fetch all pages then discard old ones | `--limit-by-date --date-before "2026-03-07T00:00:00Z"` (zero waste) |
+| "100 calendar events, 50/page" | Not possible in one command | `--page-size 50 --item-limit 100` |
+
+### Global Pagination Flags
+
+All flags work with any list command (gmail list, drive list, calendar list, tasks list, chat spaces-list, chat messages-list, contacts list, contacts directory-list):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--page-all` | off | Fetch all pages (enables multi-page mode) |
+| `--page-limit N` | 10 | Max pages to fetch (0 = unlimited) |
+| `--page-delay N` | 100 | Milliseconds between page requests |
+| `--item-limit N` | 0 | Max total items across all pages (0 = unlimited, enforced per-item) |
+| `--page-size N` | — | Override per-page item count (bypasses command default) |
+| `--limit-by-date` | off | Stop pagination when items fall outside date window |
+| `--date-after T` | — | RFC3339 timestamp lower bound (requires `--limit-by-date`) |
+| `--date-before T` | — | RFC3339 timestamp upper bound (requires `--limit-by-date`) |
+
+**Date-aware stop** uses each item's natural timestamp (Gmail: date, Drive: modifiedTime, Calendar: created, Chat: createTime/lastActiveTime, Tasks: updated) to halt pagination as soon as items fall outside your window — no wasted API calls.
 
 ---
 
