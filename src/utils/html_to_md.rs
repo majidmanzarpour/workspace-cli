@@ -4,7 +4,7 @@ use html2text::from_read;
 pub fn html_to_markdown(html: &str) -> String {
     // html2text handles the conversion
     let bytes = html.as_bytes();
-    from_read(bytes, 80)
+    from_read(bytes, 10000)
 }
 
 /// Convert HTML to plain text (strips all formatting)
