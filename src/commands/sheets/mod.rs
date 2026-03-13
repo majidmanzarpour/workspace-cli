@@ -19,6 +19,7 @@ pub use types::{
 // Re-export get functions
 pub use get::{
     get_spreadsheet,
+    get_spreadsheet_metadata,
     get_values,
     get_multiple_ranges,
     values_to_csv,

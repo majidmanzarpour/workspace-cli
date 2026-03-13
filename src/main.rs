@@ -728,6 +728,11 @@ enum SheetsCommands {
         /// Spreadsheet ID
         id: String,
     },
+    /// Show spreadsheet metadata: title, locale, and per-tab grid dimensions (rows/columns)
+    Info {
+        /// Spreadsheet ID
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2563,6 +2568,47 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 .map(|s| (s.properties.title, s.properties.sheet_id))
                                 .collect();
                             formatter.write(&tab_ids)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::Info { id } => {
+                    match workspace_cli::commands::sheets::get::get_spreadsheet_metadata(&client, &id).await {
+                        Ok(spreadsheet) => {
+                            let mut info = serde_json::Map::new();
+                            info.insert("title".into(), serde_json::Value::String(spreadsheet.properties.title));
+                            if let Some(locale) = spreadsheet.properties.locale {
+                                info.insert("locale".into(), serde_json::Value::String(locale));
+                            }
+                            if let Some(tz) = spreadsheet.properties.time_zone {
+                                info.insert("timeZone".into(), serde_json::Value::String(tz));
+                            }
+                            let tabs: Vec<serde_json::Value> = spreadsheet.sheets.into_iter().map(|s| {
+                                let mut tab = serde_json::Map::new();
+                                tab.insert("sheetId".into(), serde_json::json!(s.properties.sheet_id));
+                                tab.insert("title".into(), serde_json::Value::String(s.properties.title));
+                                tab.insert("index".into(), serde_json::json!(s.properties.index));
+                                if let Some(gp) = s.properties.grid_properties {
+                                    if let Some(rows) = gp.row_count {
+                                        tab.insert("rows".into(), serde_json::json!(rows));
+                                    }
+                                    if let Some(cols) = gp.column_count {
+                                        tab.insert("columns".into(), serde_json::json!(cols));
+                                    }
+                                    if let Some(fr) = gp.frozen_row_count {
+                                        tab.insert("frozenRows".into(), serde_json::json!(fr));
+                                    }
+                                    if let Some(fc) = gp.frozen_column_count {
+                                        tab.insert("frozenColumns".into(), serde_json::json!(fc));
+                                    }
+                                }
+                                serde_json::Value::Object(tab)
+                            }).collect();
+                            info.insert("sheets".into(), serde_json::Value::Array(tabs));
+                            formatter.write(&serde_json::Value::Object(info))?;
                         }
                         Err(e) => {
                             eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);

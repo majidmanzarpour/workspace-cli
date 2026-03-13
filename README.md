@@ -463,6 +463,9 @@ workspace-cli sheets append <sheet-id> \
 
 # Clear a range of cells
 workspace-cli sheets clear <sheet-id> --range "Sheet1!A1:C10"
+
+# Show spreadsheet metadata with per-tab grid dimensions
+workspace-cli sheets info <sheet-id>
 ```
 
 ### Slides Examples
@@ -825,6 +828,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `sheets update` | Update spreadsheet values | `--range`, `--values` |
 | `sheets append` | Append rows to spreadsheet | `--range`, `--values` |
 | `sheets clear` | Clear a range of cells | `--range` |
+| `sheets info` | Spreadsheet metadata with per-tab grid dimensions | |
 
 ### Slides Commands
 
