@@ -652,6 +652,11 @@ enum DocsCommands {
         #[arg(long)]
         file: Option<String>,
     },
+    /// Show document metadata: title, character/token count, and heading structure
+    Info {
+        /// Document ID
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2377,6 +2382,18 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 formatter.write(&response)?;
                             }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::Info { id } => {
+                    match workspace_cli::commands::docs::get::get_document_metadata(&client, &id).await {
+                        Ok(doc) => {
+                            let info = workspace_cli::commands::docs::get::document_info(&doc);
+                            formatter.write(&info)?;
                         }
                         Err(e) => {
                             eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);

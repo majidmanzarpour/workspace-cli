@@ -434,6 +434,9 @@ workspace-cli docs batch-update <doc-id> --payload '{"requests":[
 
 # Load batchUpdate requests from a JSON file
 workspace-cli docs batch-update <doc-id> --file requests.json
+
+# Show document metadata: title, character/token count, heading structure
+workspace-cli docs info <doc-id>
 ```
 
 ### Sheets Examples
@@ -818,6 +821,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `docs append` | Append text to document | None |
 | `docs replace` | Find and replace text | `--find`, `--with`, `--match-case` |
 | `docs batch-update` | Apply batchUpdate requests (headings, bold, bullets, etc.) | `--payload`, `--file` |
+| `docs info` | Document metadata with character/token count and heading structure | |
 
 ### Sheets Commands
 
