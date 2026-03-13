@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use crate::output::pagination::Timestamped;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +13,12 @@ pub struct Space {
     pub single_user_bot_dm: Option<bool>,
     pub last_active_time: Option<String>,
     pub membership_count: Option<serde_json::Value>,
+}
+
+impl Timestamped for Space {
+    fn timestamp(&self) -> Option<&str> {
+        self.last_active_time.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +42,12 @@ pub struct Message {
     pub formatted_text: Option<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+impl Timestamped for Message {
+    fn timestamp(&self) -> Option<&str> {
+        self.create_time.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

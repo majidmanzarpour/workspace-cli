@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::output::pagination::Timestamped;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -10,6 +11,12 @@ pub struct TaskList {
     pub updated: Option<String>,
     #[serde(rename = "selfLink")]
     pub self_link: Option<String>,
+}
+
+impl Timestamped for TaskList {
+    fn timestamp(&self) -> Option<&str> {
+        self.updated.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +49,12 @@ pub struct Task {
     pub deleted: Option<bool>,
 }
 
+impl Timestamped for Task {
+    fn timestamp(&self) -> Option<&str> {
+        self.updated.as_deref()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskLink {
     pub r#type: String,
@@ -68,6 +81,12 @@ pub struct MinimalTask {
     pub due: Option<String>,
     pub notes: Option<String>,
     pub completed: Option<String>,
+}
+
+impl Timestamped for MinimalTask {
+    fn timestamp(&self) -> Option<&str> {
+        self.completed.as_deref()
+    }
 }
 
 impl MinimalTask {

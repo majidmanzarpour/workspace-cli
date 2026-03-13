@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::output::pagination::Timestamped;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +158,12 @@ pub struct DraftResponse {
     pub id: String,
     pub message_id: Option<String>,
     pub thread_id: Option<String>,
+}
+
+impl Timestamped for MessageSummary {
+    fn timestamp(&self) -> Option<&str> {
+        self.date.as_deref()
+    }
 }
 
 // For sending emails

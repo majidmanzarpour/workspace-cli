@@ -4,9 +4,10 @@ Cargo.lock
 **/*.rs.bk
 *.pdb
 
-# IDE
+# IDE / AI
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~

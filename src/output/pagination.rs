@@ -2,6 +2,94 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
+/// Trait for items that have a timestamp, enabling date-aware pagination early-stop
+pub trait Timestamped {
+    /// Extract the timestamp from this item as an RFC3339 string
+    fn timestamp(&self) -> Option<&str>;
+}
+
+/// Configuration for pagination behavior, constructed from CLI flags
+#[derive(Debug, Clone)]
+pub struct PageConfig {
+    /// Whether to paginate through all pages
+    pub page_all: bool,
+    /// Maximum number of pages to fetch (0 = unlimited)
+    pub page_limit: u32,
+    /// Delay in milliseconds between page requests
+    pub page_delay: u64,
+    /// Maximum number of items to fetch across all pages (0 = unlimited)
+    pub item_limit: u32,
+    /// Number of items per API request page (overrides command default)
+    pub page_size: Option<u32>,
+    /// Stop paginating when items fall outside the date window
+    pub limit_by_date: bool,
+    /// Only include items after this RFC3339 timestamp
+    pub after: Option<String>,
+    /// Only include items before this RFC3339 timestamp
+    pub before: Option<String>,
+}
+
+impl PageConfig {
+    /// Check if pagination is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.page_all
+    }
+
+    /// Check if we should continue to the next page
+    pub fn should_continue(&self, page_num: u32) -> bool {
+        if !self.page_all {
+            return false;
+        }
+        if self.page_limit > 0 && page_num >= self.page_limit {
+            return false;
+        }
+        true
+    }
+
+    /// Delay between page requests
+    pub async fn delay(&self) {
+        if self.page_delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(self.page_delay)).await;
+        }
+    }
+
+    /// Check if an item's timestamp is outside the date window.
+    /// Returns true if pagination should stop (item is past the boundary).
+    pub fn is_past_date_boundary<T: Timestamped>(&self, item: &T) -> bool {
+        if !self.limit_by_date {
+            return false;
+        }
+        if let Some(ts) = item.timestamp() {
+            if let Some(ref after) = self.after {
+                if ts < after.as_str() {
+                    return true;
+                }
+            }
+            if let Some(ref before) = self.before {
+                if ts > before.as_str() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+impl Default for PageConfig {
+    fn default() -> Self {
+        Self {
+            page_all: false,
+            page_limit: 0,
+            page_delay: 0,
+            item_limit: 0,
+            page_size: None,
+            limit_by_date: false,
+            after: None,
+            before: None,
+        }
+    }
+}
+
 /// Common pagination response wrapper for Google APIs
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -210,36 +298,6 @@ where
             if !state.should_continue() {
                 break;
             }
-        }
-    }
-}
-
-/// Configuration for auto-pagination via CLI flags
-pub struct PageConfig {
-    pub page_all: bool,
-    pub page_limit: u32,  // 0 = unlimited
-    pub page_delay: u64,  // milliseconds
-}
-
-impl PageConfig {
-    /// Returns true if pagination should continue after this page number (1-indexed).
-    /// `page_limit == 0` means unlimited. `page_all` controls whether pagination is
-    /// enabled; `page_limit` caps how many pages are fetched.
-    pub fn should_continue(&self, page_num: u32) -> bool {
-        if self.page_limit == 0 { return true; }  // 0 = unlimited
-        page_num < self.page_limit
-    }
-
-    /// Returns true if auto-pagination is enabled at all.
-    /// Only `--page-all` enables pagination; `--page-limit` is a cap that only applies
-    /// when `--page-all` is set.
-    pub fn is_enabled(&self) -> bool {
-        self.page_all
-    }
-
-    pub async fn delay(&self) {
-        if self.page_delay > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(self.page_delay)).await;
         }
     }
 }
