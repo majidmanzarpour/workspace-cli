@@ -7,6 +7,12 @@ pub async fn get_spreadsheet(client: &ApiClient, spreadsheet_id: &str) -> Result
     client.get(&path).await
 }
 
+pub async fn get_spreadsheet_metadata(client: &ApiClient, spreadsheet_id: &str) -> Result<Spreadsheet> {
+    let path = format!("/spreadsheets/{}", spreadsheet_id);
+    let query = [("fields", "spreadsheetId,properties,sheets.properties")];
+    client.get_with_query(&path, &query).await
+}
+
 pub async fn get_values(
     client: &ApiClient,
     spreadsheet_id: &str,

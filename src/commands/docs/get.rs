@@ -7,6 +7,70 @@ pub async fn get_document(client: &ApiClient, document_id: &str) -> Result<Docum
     client.get(&path).await
 }
 
+pub async fn get_document_metadata(client: &ApiClient, document_id: &str) -> Result<Document> {
+    let path = format!("/documents/{}", document_id);
+    let query = [("fields", "documentId,title,revisionId,body.content(endIndex,paragraph(paragraphStyle(namedStyleType),elements(textRun(content))))")];
+    client.get_with_query(&path, &query).await
+}
+
+/// Extract info summary from a lightweight document fetch
+pub fn document_info(doc: &Document) -> serde_json::Value {
+    let mut info = serde_json::Map::new();
+    info.insert("documentId".into(), serde_json::json!(doc.document_id));
+    info.insert("title".into(), serde_json::json!(doc.title));
+    if let Some(ref rev) = doc.revision_id {
+        info.insert("revisionId".into(), serde_json::json!(rev));
+    }
+
+    let elements = doc.body.as_ref().map(|b| &b.content[..]).unwrap_or(&[]);
+
+    // Character count from max endIndex
+    let chars: i64 = elements.iter()
+        .filter_map(|e| e.end_index)
+        .max()
+        .unwrap_or(0);
+    info.insert("characters".into(), serde_json::json!(chars));
+    info.insert("estimatedTokens".into(), serde_json::json!(chars / 4));
+
+    // Count paragraphs and extract headings
+    let mut headings = Vec::new();
+    let mut paragraph_count: i64 = 0;
+    let mut table_count: i64 = 0;
+
+    for element in elements {
+        if let Some(ref para) = element.paragraph {
+            paragraph_count += 1;
+            if let Some(ref style) = para.paragraph_style {
+                if let Some(ref named) = style.named_style_type {
+                    if named.starts_with("HEADING") {
+                        let text: String = para.elements.iter()
+                            .filter_map(|e| e.text_run.as_ref()?.content.as_ref())
+                            .map(|s| s.trim().to_string())
+                            .collect::<Vec<_>>()
+                            .join("");
+                        let level = named.strip_prefix("HEADING_")
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .unwrap_or(0);
+                        let mut h = serde_json::Map::new();
+                        h.insert("level".into(), serde_json::json!(level));
+                        h.insert("text".into(), serde_json::json!(text));
+                        headings.push(serde_json::Value::Object(h));
+                    }
+                }
+            }
+        }
+        if element.table.is_some() {
+            table_count += 1;
+        }
+    }
+
+    info.insert("paragraphs".into(), serde_json::json!(paragraph_count));
+    info.insert("tables".into(), serde_json::json!(table_count));
+    info.insert("headings".into(), serde_json::Value::Array(headings));
+
+    serde_json::Value::Object(info)
+}
+
 /// Convert a Google Doc to Markdown format for token efficiency
 pub fn document_to_markdown(doc: &Document) -> String {
     let mut markdown = String::new();

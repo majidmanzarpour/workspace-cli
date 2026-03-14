@@ -434,6 +434,9 @@ workspace-cli docs batch-update <doc-id> --payload '{"requests":[
 
 # Load batchUpdate requests from a JSON file
 workspace-cli docs batch-update <doc-id> --file requests.json
+
+# Show document metadata: title, character/token count, heading structure
+workspace-cli docs info <doc-id>
 ```
 
 ### Sheets Examples
@@ -463,6 +466,9 @@ workspace-cli sheets append <sheet-id> \
 
 # Clear a range of cells
 workspace-cli sheets clear <sheet-id> --range "Sheet1!A1:C10"
+
+# Show spreadsheet metadata with per-tab grid dimensions
+workspace-cli sheets info <sheet-id>
 ```
 
 ### Slides Examples
@@ -815,6 +821,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `docs append` | Append text to document | None |
 | `docs replace` | Find and replace text | `--find`, `--with`, `--match-case` |
 | `docs batch-update` | Apply batchUpdate requests (headings, bold, bullets, etc.) | `--payload`, `--file` |
+| `docs info` | Document metadata with character/token count and heading structure | |
 
 ### Sheets Commands
 
@@ -825,6 +832,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `sheets update` | Update spreadsheet values | `--range`, `--values` |
 | `sheets append` | Append rows to spreadsheet | `--range`, `--values` |
 | `sheets clear` | Clear a range of cells | `--range` |
+| `sheets info` | Spreadsheet metadata with per-tab grid dimensions | |
 
 ### Slides Commands
 

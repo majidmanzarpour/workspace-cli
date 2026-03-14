@@ -28,6 +28,19 @@ pub struct SheetProperties {
     pub sheet_id: i64,
     pub title: String,
     pub index: i64,
+    #[serde(default)]
+    pub grid_properties: Option<GridProperties>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridProperties {
+    pub row_count: Option<i64>,
+    pub column_count: Option<i64>,
+    #[serde(default)]
+    pub frozen_row_count: Option<i64>,
+    #[serde(default)]
+    pub frozen_column_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
