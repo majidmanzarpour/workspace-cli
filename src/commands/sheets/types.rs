@@ -18,8 +18,35 @@ pub struct SpreadsheetProperties {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Sheet {
     pub properties: SheetProperties,
+    #[serde(default)]
+    pub filter_views: Vec<FilterView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterView {
+    pub filter_view_id: i64,
+    pub title: String,
+    #[serde(default)]
+    pub range: Option<GridRange>,
+    #[serde(default)]
+    pub filter_specs: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub criteria: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridRange {
+    #[serde(default)]
+    pub sheet_id: i64,
+    pub start_row_index: Option<i64>,
+    pub end_row_index: Option<i64>,
+    pub start_column_index: Option<i64>,
+    pub end_column_index: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

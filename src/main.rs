@@ -722,11 +722,103 @@ enum SheetsCommands {
         #[arg(long)]
         sheet_id: i64,
     },
+    /// Rename a sheet tab
+    #[command(name = "rename-sheet")]
+    RenameSheet {
+        /// Spreadsheet ID
+        id: String,
+        /// Sheet ID (numeric, default 0 for first sheet)
+        #[arg(long, default_value = "0")]
+        sheet_id: i64,
+        /// New title for the sheet tab
+        title: String,
+    },
+    /// Insert rows or columns at a position (shifts existing data)
+    #[command(name = "insert-dimension")]
+    InsertDimension {
+        /// Spreadsheet ID
+        id: String,
+        /// Dimension: "columns" or "rows"
+        #[arg(long)]
+        dimension: String,
+        /// Start index (0-based, e.g. 25 for column Z)
+        #[arg(long)]
+        at: i64,
+        /// Number to insert
+        #[arg(long, default_value = "1")]
+        count: i64,
+        /// Sheet ID (numeric, default 0 for first sheet)
+        #[arg(long, default_value = "0")]
+        sheet_id: i64,
+    },
+    /// Delete rows or columns at a position
+    #[command(name = "delete-dimension")]
+    DeleteDimension {
+        /// Spreadsheet ID
+        id: String,
+        /// Dimension: "columns" or "rows"
+        #[arg(long)]
+        dimension: String,
+        /// Start index (0-based)
+        #[arg(long)]
+        at: i64,
+        /// Number to delete
+        #[arg(long, default_value = "1")]
+        count: i64,
+        /// Sheet ID (numeric, default 0 for first sheet)
+        #[arg(long, default_value = "0")]
+        sheet_id: i64,
+    },
     /// List all sheet tabs with their numeric sheet IDs
     #[command(name = "list-sheets")]
     ListSheets {
         /// Spreadsheet ID
         id: String,
+    },
+    /// Add a named filter view to a spreadsheet
+    #[command(name = "add-filter-view")]
+    AddFilterView {
+        /// Spreadsheet ID
+        id: String,
+        /// Filter view name
+        #[arg(long)]
+        title: String,
+        /// Sheet ID (numeric, default 0 for first sheet)
+        #[arg(long, default_value = "0")]
+        sheet_id: i64,
+        /// Filter criteria as JSON array: [{"column": 5, "condition": {"type": "TEXT_EQ", "values": ["T1"]}}]
+        #[arg(long)]
+        criteria: String,
+    },
+    /// List all filter views in a spreadsheet
+    #[command(name = "list-filter-views")]
+    ListFilterViews {
+        /// Spreadsheet ID
+        id: String,
+    },
+    /// Delete a filter view by its ID
+    #[command(name = "delete-filter-view")]
+    DeleteFilterView {
+        /// Spreadsheet ID
+        id: String,
+        /// Filter view ID (numeric, from list-filter-views)
+        #[arg(long)]
+        filter_id: i64,
+    },
+    /// Update a filter view's title or criteria
+    #[command(name = "update-filter-view")]
+    UpdateFilterView {
+        /// Spreadsheet ID
+        id: String,
+        /// Filter view ID (numeric)
+        #[arg(long)]
+        filter_id: i64,
+        /// New title (optional)
+        #[arg(long)]
+        title: Option<String>,
+        /// New criteria as JSON array (optional)
+        #[arg(long)]
+        criteria: Option<String>,
     },
 }
 
@@ -2539,6 +2631,130 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 SheetsCommands::DeleteSheet { id, sheet_id } => {
                     match workspace_cli::commands::sheets::manage::delete_sheet(&client, &id, sheet_id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::RenameSheet { id, sheet_id, title } => {
+                    match workspace_cli::commands::sheets::manage::rename_sheet(&client, &id, sheet_id, &title).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::InsertDimension { id, dimension, at, count, sheet_id } => {
+                    match workspace_cli::commands::sheets::manage::insert_dimension(&client, &id, sheet_id, &dimension, at, count).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::DeleteDimension { id, dimension, at, count, sheet_id } => {
+                    match workspace_cli::commands::sheets::manage::delete_dimension(&client, &id, sheet_id, &dimension, at, count).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::AddFilterView { id, title, sheet_id, criteria } => {
+                    match workspace_cli::commands::sheets::manage::add_filter_view(&client, &id, &title, sheet_id, &criteria).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::ListFilterViews { id } => {
+                    match workspace_cli::commands::sheets::get::get_spreadsheet(&client, &id).await {
+                        Ok(spreadsheet) => {
+                            let filter_views: Vec<_> = spreadsheet.sheets.into_iter()
+                                .flat_map(|s| s.filter_views)
+                                .map(|fv| serde_json::json!({
+                                    "id": fv.filter_view_id,
+                                    "title": fv.title,
+                                    "range": fv.range,
+                                    "filterSpecs": fv.filter_specs,
+                                }))
+                                .collect();
+                            formatter.write(&filter_views)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::DeleteFilterView { id, filter_id } => {
+                    match workspace_cli::commands::sheets::manage::delete_filter_view(&client, &id, filter_id).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::UpdateFilterView { id, filter_id, title, criteria } => {
+                    match workspace_cli::commands::sheets::manage::update_filter_view(
+                        &client, &id, filter_id, title.as_deref(), criteria.as_deref()
+                    ).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;

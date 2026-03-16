@@ -39,4 +39,5 @@ pub use update::{
 pub use create::{create_spreadsheet, create_spreadsheet_with_sheets};
 
 // Re-export manage functions
-pub use manage::{add_sheet, delete_sheet, BatchUpdateResponse};
+pub use manage::{add_sheet, delete_sheet, rename_sheet, add_filter_view, delete_filter_view, update_filter_view, insert_dimension, delete_dimension, BatchUpdateResponse};
+pub use types::FilterView;
