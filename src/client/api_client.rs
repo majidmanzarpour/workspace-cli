@@ -31,6 +31,10 @@ pub struct ApiClient {
     retry_config: RetryConfig,
     base_url: String,
     dry_run: bool,
+    /// When true, every outgoing URL gets `supportsAllDrives=true` and
+    /// `includeItemsFromAllDrives=true`. Required to see items in Shared Drives
+    /// via Drive v3 — otherwise the API returns 404 even to members.
+    shared_drives: bool,
 }
 
 impl Clone for ApiClient {
@@ -42,6 +46,7 @@ impl Clone for ApiClient {
             retry_config: self.retry_config.clone(),
             base_url: self.base_url.clone(),
             dry_run: self.dry_run,
+            shared_drives: self.shared_drives,
         }
     }
 }
@@ -64,7 +69,16 @@ impl ApiClient {
             retry_config: RetryConfig::default(),
             base_url: String::new(),
             dry_run: false,
+            shared_drives: false,
         }
+    }
+
+    /// Enable shared-drive support: appends `supportsAllDrives=true` and
+    /// `includeItemsFromAllDrives=true` to every outgoing URL. Must be set for
+    /// all Drive v3 calls — items in Shared Drives return 404 without it.
+    pub fn with_shared_drives(mut self) -> Self {
+        self.shared_drives = true;
+        self
     }
 
     /// Set the base URL for this client
@@ -105,6 +119,7 @@ impl ApiClient {
             .with_base_url(endpoints::DRIVE)
             .with_rate_limiter(ApiRateLimiter::drive())
             .with_retry_config(RetryConfig::conservative())
+            .with_shared_drives()
     }
 
     /// Create a Calendar client
@@ -185,12 +200,21 @@ impl ApiClient {
             .with_retry_config(RetryConfig::default())
     }
 
-    /// Build full URL from path
+    /// Build full URL from path. For Drive clients (with `shared_drives`
+    /// enabled), appends `supportsAllDrives=true&includeItemsFromAllDrives=true`
+    /// so that Shared Drive items are visible.
     fn build_url(&self, path: &str) -> String {
-        if path.starts_with("http") {
+        let full = if path.starts_with("http") {
             path.to_string()
         } else {
             format!("{}{}", self.base_url, path)
+        };
+
+        if self.shared_drives {
+            let sep = if full.contains('?') { "&" } else { "?" };
+            format!("{}{}supportsAllDrives=true&includeItemsFromAllDrives=true", full, sep)
+        } else {
+            full
         }
     }
 

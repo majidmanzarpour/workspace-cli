@@ -82,7 +82,7 @@ async fn simple_upload(
     body.extend_from_slice(format!("\r\n--{}--", boundary).as_bytes());
 
     let response = client
-        .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
+        .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true")
         .header("Authorization", format!("Bearer {}", access_token))
         .header("Content-Type", format!("multipart/related; boundary={}", boundary))
         .body(body)
@@ -124,7 +124,7 @@ async fn resumable_upload(
 
     // Step 1: Initiate resumable upload
     let init_response = client
-        .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable")
+        .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true")
         .header("Authorization", format!("Bearer {}", access_token))
         .header("Content-Type", "application/json")
         .header("X-Upload-Content-Type", mime_type)

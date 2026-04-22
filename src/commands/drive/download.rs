@@ -13,7 +13,7 @@ pub async fn download_file(
     let client = Client::new();
 
     let url = format!(
-        "https://www.googleapis.com/drive/v3/files/{}?alt=media",
+        "https://www.googleapis.com/drive/v3/files/{}?alt=media&supportsAllDrives=true",
         file_id
     );
 
@@ -58,7 +58,7 @@ pub async fn export_file(
     let client = Client::new();
 
     let url = format!(
-        "https://www.googleapis.com/drive/v3/files/{}/export?mimeType={}",
+        "https://www.googleapis.com/drive/v3/files/{}/export?mimeType={}&supportsAllDrives=true",
         file_id,
         urlencoding::encode(mime_type)
     );
