@@ -652,6 +652,17 @@ enum DocsCommands {
         #[arg(long)]
         file: Option<String>,
     },
+    /// Suggest a text replacement via an anchored comment
+    Suggest {
+        /// Document ID
+        id: String,
+        /// Text to find (will be quoted in the comment anchor)
+        #[arg(long)]
+        find: String,
+        /// Suggested replacement text
+        #[arg(long, name = "with")]
+        replace_with: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2364,6 +2375,33 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         .map_err(|e| format!("Invalid JSON: {}", e))?;
                     let path = format!("/documents/{}:batchUpdate", id);
                     match client.post::<serde_json::Value, serde_json::Value>(&path, &body).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::Suggest { id, find, replace_with } => {
+                    // Use Drive API comments to create an anchored suggestion
+                    let drive_client = ApiClient::drive(token_manager.clone()).with_dry_run(cli.dry_run);
+                    let comment_body = serde_json::json!({
+                        "content": format!("Suggested edit: {}", replace_with),
+                        "quotedFileContent": {
+                            "mimeType": "text/plain",
+                            "value": find
+                        }
+                    });
+                    let path = format!("/files/{}/comments?fields=id,content,quotedFileContent,author,createdTime,anchor", id);
+                    match drive_client.post::<serde_json::Value, serde_json::Value>(&path, &comment_body).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
