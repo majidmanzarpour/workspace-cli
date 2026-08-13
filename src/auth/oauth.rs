@@ -87,6 +87,7 @@ pub async fn create_installed_flow_auth(
 
     let auth = InstalledFlowAuthenticator::builder(secret, InstalledFlowReturnMethod::HTTPRedirect)
         .persist_tokens_to_disk(token_cache_path)
+        .force_account_selection(true)
         .build()
         .await
         .map_err(|e| AuthError::FlowFailed(e.to_string()))?;
