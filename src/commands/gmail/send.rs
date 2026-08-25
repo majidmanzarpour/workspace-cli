@@ -99,12 +99,76 @@ fn build_raw_email(params: &ComposeParams) -> String {
         email.push_str(&format!("Subject: =?UTF-8?B?{}?=\r\n", encoded));
     }
 
+    // Send multipart/alternative: a text/plain part for clients that want it, and
+    // a text/html part that Gmail actually renders.
+    //
+    // Why not text/plain alone: Gmail displays a text/plain body in its
+    // fixed-width reading and compose view, which hard-wraps the text around 80
+    // columns. The stored message is fine (paragraphs stay on one long line), but
+    // the moment you open the draft in Gmail's composer those visual breaks get
+    // baked into the message you send, so a normal paragraph goes out looking
+    // like a ragged column. Offering an HTML alternative makes Gmail treat it as
+    // an ordinary rich-text mail and reflow it to the window.
+    let boundary = format!("----=_workspace_cli_{}", uuid::Uuid::new_v4().simple());
     email.push_str("MIME-Version: 1.0\r\n");
+    email.push_str(&format!(
+        "Content-Type: multipart/alternative; boundary=\"{}\"\r\n",
+        boundary
+    ));
+    email.push_str("\r\n");
+
+    // Plain-text alternative, body verbatim.
+    email.push_str(&format!("--{}\r\n", boundary));
     email.push_str("Content-Type: text/plain; charset=utf-8\r\n");
     email.push_str("\r\n");
-    email.push_str(&params.body);
+    email.push_str(&normalize_newlines(&params.body));
+    email.push_str("\r\n");
+
+    // HTML alternative.
+    email.push_str(&format!("--{}\r\n", boundary));
+    email.push_str("Content-Type: text/html; charset=utf-8\r\n");
+    email.push_str("\r\n");
+    email.push_str(&body_to_html(&params.body));
+    email.push_str("\r\n");
+
+    email.push_str(&format!("--{}--\r\n", boundary));
 
     email
+}
+
+/// CRLF line endings, as RFC 5322 requires for transport.
+fn normalize_newlines(body: &str) -> String {
+    body.replace("\r\n", "\n").replace('\r', "\n").replace('\n', "\r\n")
+}
+
+/// Minimal, deliberately boring plain-text to HTML conversion.
+///
+/// A blank line starts a new paragraph; a single newline inside a paragraph
+/// becomes a <br>. Everything is escaped, so this never emits markup the caller
+/// did not ask for. No inline styles: the aim is an email that looks like one
+/// typed in Gmail, not a designed template.
+fn body_to_html(body: &str) -> String {
+    let escape = |s: &str| -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+
+    let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
+    let paragraphs: Vec<String> = normalized
+        .split("\n\n")
+        .map(|para| para.trim_matches('\n'))
+        .filter(|para| !para.trim().is_empty())
+        .map(|para| {
+            let lines: Vec<String> = para.split('\n').map(|l| escape(l)).collect();
+            format!("<div>{}</div>", lines.join("<br>"))
+        })
+        .collect();
+
+    format!(
+        "<html><body>{}</body></html>",
+        paragraphs.join("<div><br></div>")
+    )
 }
 
 /// Metadata extracted from an original message for constructing a reply
