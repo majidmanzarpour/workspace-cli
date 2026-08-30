@@ -1,7 +1,13 @@
 use crate::client::ApiClient;
 use crate::error::Result;
 use super::types::File;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize)]
+struct ParentsResponse {
+    #[serde(default)]
+    parents: Vec<String>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,17 +37,25 @@ pub async fn move_file(
     new_parent_id: &str,
     remove_from_current: bool,
 ) -> Result<File> {
-    // First, get the current parents if we need to remove them
-    let mut path = format!("/files/{}?addParents={}",
-        urlencoding::encode(file_id),
+    let encoded_id = urlencoding::encode(file_id);
+    let mut path = format!(
+        "/files/{}?addParents={}&supportsAllDrives=true&fields=id,name,mimeType,parents,webViewLink,modifiedTime",
+        encoded_id,
         urlencoding::encode(new_parent_id)
     );
 
     if remove_from_current {
-        // Get current file to find existing parents
-        let file: File = client.get(&format!("/files/{}?fields=parents", urlencoding::encode(file_id))).await?;
-        if !file.parents.is_empty() {
-            let remove_parents = file.parents.join(",");
+        // Get current parents using lightweight struct (File requires id/name/mimeType)
+        let query = [
+            ("fields", "parents"),
+            ("supportsAllDrives", "true"),
+        ];
+        let resp: ParentsResponse = client.get_with_query(
+            &format!("/files/{}", encoded_id),
+            &query,
+        ).await?;
+        if !resp.parents.is_empty() {
+            let remove_parents = resp.parents.join(",");
             path = format!("{}&removeParents={}", path, urlencoding::encode(&remove_parents));
         }
     }
