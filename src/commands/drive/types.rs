@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::output::pagination::Timestamped;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +24,12 @@ pub struct File {
     pub permissions: Vec<FilePermission>,
     pub viewed_by_me_time: Option<String>,
     pub shortcut_details: Option<ShortcutDetails>,
+}
+
+impl Timestamped for File {
+    fn timestamp(&self) -> Option<&str> {
+        self.modified_time.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

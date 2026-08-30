@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::output::pagination::Timestamped;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +18,12 @@ pub struct Event {
     pub created: Option<String>,
     pub updated: Option<String>,
     pub recurrence: Option<Vec<String>>,
+}
+
+impl Timestamped for Event {
+    fn timestamp(&self) -> Option<&str> {
+        self.created.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

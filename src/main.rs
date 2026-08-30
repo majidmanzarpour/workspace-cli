@@ -54,6 +54,26 @@ struct Cli {
     #[arg(long, global = true, default_value = "100")]
     page_delay: u64,
 
+    /// Maximum total items to fetch across all pages (0 = unlimited)
+    #[arg(long, global = true, default_value = "0")]
+    item_limit: u32,
+
+    /// Override the per-page item count for list commands
+    #[arg(long, global = true)]
+    page_size: Option<u32>,
+
+    /// Stop paginating when items fall outside the --date-after/--date-before window
+    #[arg(long, global = true)]
+    limit_by_date: bool,
+
+    /// Only include items after this RFC3339 timestamp (used with --limit-by-date)
+    #[arg(long, global = true)]
+    date_after: Option<String>,
+
+    /// Only include items before this RFC3339 timestamp (used with --limit-by-date)
+    #[arg(long, global = true)]
+    date_before: Option<String>,
+
     /// Preview API request without executing it (prints request details and exits)
     #[arg(long, global = true)]
     dry_run: bool,
@@ -1326,6 +1346,11 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         page_all: cli.page_all,
         page_limit: cli.page_limit,
         page_delay: cli.page_delay,
+        item_limit: cli.item_limit,
+        page_size: cli.page_size,
+        limit_by_date: cli.limit_by_date,
+        after: cli.date_after.clone(),
+        before: cli.date_before.clone(),
     };
 
     // Route commands
@@ -1347,7 +1372,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 GmailCommands::List { query, limit, label } => {
                     let mut params = workspace_cli::commands::gmail::list::ListParams {
                         query,
-                        max_results: limit,
+                        max_results: page_cfg.page_size.unwrap_or(limit),
                         label_ids: label.map(|l| vec![l]),
                         page_token: None,
                     };
@@ -1369,15 +1394,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
+                        let mut date_stop = false;
                         loop {
                             match workspace_cli::commands::gmail::list::list_messages_with_metadata(&client, params.clone(), &access_token).await {
                                 Ok(response) => {
                                     for msg in &response.messages {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
+                                        if page_cfg.is_past_date_boundary(msg) { date_stop = true; break; }
                                         active_formatter.stream_item(msg)?;
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit)
+                                        || date_stop {
                                         break;
                                     }
                                     page_cfg.delay().await;
@@ -1769,7 +1801,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     let mut params = workspace_cli::commands::drive::list::ListParams {
                         query: final_query,
-                        max_results: limit,
+                        max_results: page_cfg.page_size.unwrap_or(limit),
                         page_token,
                         fields: fields.as_ref().map(|f| f.join(",")),
                         order_by: None,
@@ -1786,15 +1818,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
+                        let mut date_stop = false;
                         loop {
                             match workspace_cli::commands::drive::list::list_files(&client, params.clone()).await {
                                 Ok(response) => {
                                     for f in &response.files {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
+                                        if page_cfg.is_past_date_boundary(f) { date_stop = true; break; }
                                         active_formatter.stream_item(f)?;
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit)
+                                        || date_stop {
                                         break;
                                     }
                                     page_cfg.delay().await;
@@ -2127,7 +2166,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         calendar_id: calendar,
                         time_min,
                         time_max,
-                        max_results: limit,
+                        max_results: page_cfg.page_size.unwrap_or(limit),
                         single_events: true,
                         order_by: Some("startTime".to_string()),
                         sync_token,
@@ -2143,22 +2182,27 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
+                        let mut date_stop = false;
                         loop {
                             match workspace_cli::commands::calendar::list::list_events(&client, params.clone()).await {
                                 Ok(response) => {
-                                    if full {
-                                        for event in &response.items {
+                                    for event in &response.items {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
+                                        if page_cfg.is_past_date_boundary(event) { date_stop = true; break; }
+                                        if full {
                                             active_formatter.stream_item(event)?;
-                                        }
-                                    } else {
-                                        for event in &response.items {
+                                        } else {
                                             let minimal = workspace_cli::commands::calendar::types::MinimalEvent::from_event(event);
                                             active_formatter.stream_item(&minimal)?;
                                         }
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit)
+                                        || date_stop {
                                         break;
                                     }
                                     page_cfg.delay().await;
@@ -2906,7 +2950,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 TasksCommands::List { list, limit, show_completed, full } => {
                     let mut params = workspace_cli::commands::tasks::list::ListTasksParams {
                         task_list_id: list,
-                        max_results: limit.min(100),  // API max is 100
+                        max_results: page_cfg.page_size.unwrap_or(limit).min(100),  // API max is 100
                         show_completed,
                         show_hidden: false,
                         page_token: None,
@@ -2921,22 +2965,27 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
+                        let mut date_stop = false;
                         loop {
                             match workspace_cli::commands::tasks::list::list_tasks(&client, params.clone()).await {
                                 Ok(response) => {
-                                    if full {
-                                        for task in &response.items {
+                                    for task in &response.items {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
+                                        if page_cfg.is_past_date_boundary(task) { date_stop = true; break; }
+                                        if full {
                                             active_formatter.stream_item(task)?;
-                                        }
-                                    } else {
-                                        for task in &response.items {
+                                        } else {
                                             let minimal = workspace_cli::commands::tasks::types::MinimalTask::from_task(task);
                                             active_formatter.stream_item(&minimal)?;
                                         }
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit)
+                                        || date_stop {
                                         break;
                                     }
                                     page_cfg.delay().await;
@@ -3242,7 +3291,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         None => None,
                     };
                     let mut params = workspace_cli::commands::chat::spaces::ListSpacesParams {
-                        page_size: limit, page_token: None, filter,
+                        page_size: page_cfg.page_size.unwrap_or(limit), page_token: None, filter,
                     };
 
                     if page_cfg.is_enabled() {
@@ -3254,15 +3303,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
+                        let mut date_stop = false;
                         loop {
                             match workspace_cli::commands::chat::spaces::list_spaces(&client, params.clone()).await {
                                 Ok(response) => {
                                     for space in &response.spaces {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
+                                        if page_cfg.is_past_date_boundary(space) { date_stop = true; break; }
                                         active_formatter.stream_item(space)?;
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit)
+                                        || date_stop {
                                         break;
                                     }
                                     page_cfg.delay().await;
@@ -3336,7 +3392,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let filter = if filter_parts.is_empty() { None } else { Some(filter_parts.join(" AND ")) };
                     let mut params = workspace_cli::commands::chat::messages::ListMessagesParams {
                         space_name: space,
-                        page_size: limit,
+                        page_size: page_cfg.page_size.unwrap_or(limit),
                         page_token: None,
                         order_by: Some(order_by),
                         filter,
@@ -3351,15 +3407,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
+                        let mut date_stop = false;
                         loop {
                             match workspace_cli::commands::chat::messages::list_messages(&client, params.clone()).await {
                                 Ok(response) => {
                                     for msg in &response.messages {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
+                                        if page_cfg.is_past_date_boundary(msg) { date_stop = true; break; }
                                         active_formatter.stream_item(msg)?;
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit)
+                                        || date_stop {
                                         break;
                                     }
                                     page_cfg.delay().await;
@@ -3544,7 +3607,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             match command {
                 ContactsCommands::List { limit } => {
                     let mut params = workspace_cli::commands::contacts::list::ListContactsParams {
-                        page_size: limit, page_token: None,
+                        page_size: page_cfg.page_size.unwrap_or(limit), page_token: None,
                     };
 
                     if page_cfg.is_enabled() {
@@ -3556,15 +3619,19 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
                         loop {
                             match workspace_cli::commands::contacts::list::list_contacts(&client, params.clone()).await {
                                 Ok(response) => {
                                     for person in &response.connections {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
                                         active_formatter.stream_item(person)?;
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit) {
                                         break;
                                     }
                                     page_cfg.delay().await;
@@ -3639,7 +3706,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 ContactsCommands::DirectoryList { limit } => {
                     let mut params = workspace_cli::commands::contacts::search::DirectoryListParams {
-                        page_size: limit, page_token: None,
+                        page_size: page_cfg.page_size.unwrap_or(limit), page_token: None,
                     };
 
                     if page_cfg.is_enabled() {
@@ -3651,15 +3718,19 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         };
                         active_formatter.start_stream()?;
                         let mut page_num = 0u32;
+                        let mut total_items = 0u32;
                         loop {
                             match workspace_cli::commands::contacts::search::list_directory(&client, params.clone()).await {
                                 Ok(response) => {
                                     for person in &response.people {
+                                        if page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit { break; }
                                         active_formatter.stream_item(person)?;
+                                        total_items += 1;
                                     }
                                     page_num += 1;
                                     let next_token = response.next_page_token.clone();
-                                    if next_token.is_none() || !page_cfg.should_continue(page_num) {
+                                    if next_token.is_none() || !page_cfg.should_continue(page_num)
+                                        || (page_cfg.item_limit > 0 && total_items >= page_cfg.item_limit) {
                                         break;
                                     }
                                     page_cfg.delay().await;
