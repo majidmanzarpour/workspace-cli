@@ -463,6 +463,34 @@ workspace-cli sheets append <sheet-id> \
 
 # Clear a range of cells
 workspace-cli sheets clear <sheet-id> --range "Sheet1!A1:C10"
+
+# Rename a sheet tab
+workspace-cli sheets rename-sheet <sheet-id> "New Tab Name"
+
+# Insert 2 columns at position 5 (shifts existing columns right)
+workspace-cli sheets insert-dimension <sheet-id> --dimension columns --at 5 --count 2
+
+# Delete 3 rows starting at row 10
+workspace-cli sheets delete-dimension <sheet-id> --dimension rows --at 10 --count 3
+
+# Add a filter view
+workspace-cli sheets add-filter-view <sheet-id> \
+  --title "High Value" \
+  --criteria '[{"column": 5, "condition": {"type": "NUMBER_GREATER", "values": ["10000"]}}]'
+
+# Add a filter view with custom formula (complex conditions)
+workspace-cli sheets add-filter-view <sheet-id> \
+  --title "Between 500 and 1000" \
+  --criteria '[{"column": 5, "condition": {"type": "CUSTOM_FORMULA", "values": ["=AND(F2>=500,F2<1000)"]}}]'
+
+# List all filter views with IDs and criteria
+workspace-cli sheets list-filter-views <sheet-id>
+
+# Update a filter view title or criteria
+workspace-cli sheets update-filter-view <sheet-id> --filter-id 123456 --title "New Name"
+
+# Delete a filter view
+workspace-cli sheets delete-filter-view <sheet-id> --filter-id 123456
 ```
 
 ### Slides Examples
@@ -825,6 +853,13 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `sheets update` | Update spreadsheet values | `--range`, `--values` |
 | `sheets append` | Append rows to spreadsheet | `--range`, `--values` |
 | `sheets clear` | Clear a range of cells | `--range` |
+| `sheets rename-sheet` | Rename a sheet tab | `--sheet-id` |
+| `sheets insert-dimension` | Insert rows or columns | `--dimension`, `--at`, `--count` |
+| `sheets delete-dimension` | Delete rows or columns | `--dimension`, `--at`, `--count` |
+| `sheets add-filter-view` | Add a named filter view | `--title`, `--criteria` |
+| `sheets list-filter-views` | List all filter views | None |
+| `sheets update-filter-view` | Update filter view | `--filter-id`, `--title`, `--criteria` |
+| `sheets delete-filter-view` | Delete a filter view | `--filter-id` |
 
 ### Slides Commands
 
